@@ -47,14 +47,12 @@ make docker-client
 ## CI/CD
 
 GitHub Actions runs tests on pull requests and on pushes to `main`.
-On pushes to `main`, it builds and pushes `Dockerfile.client` to your private registry.
+On pushes to `main`, it builds and pushes `Dockerfile.client` to GitHub Container Registry:
 
-Set these repository secrets:
+- `ghcr.io/antoinecorbel7/plex-tunnel:sha-<commit>`
+- `ghcr.io/antoinecorbel7/plex-tunnel:latest`
 
-- `PRIVATE_DOCKER_REGISTRY` (example: `registry.example.com`)
-- `PRIVATE_DOCKER_USERNAME`
-- `PRIVATE_DOCKER_PASSWORD`
-- `PRIVATE_DOCKER_IMAGE` (full image path without tag, example: `registry.example.com/team/plextunnel-client`)
+No extra Docker credentials are required in repo secrets for same-repo publishing.
 
 ## Development
 
