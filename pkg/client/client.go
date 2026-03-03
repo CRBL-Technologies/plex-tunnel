@@ -1,4 +1,4 @@
-package agent
+package client
 
 import (
 	"bytes"
@@ -15,28 +15,28 @@ import (
 	"github.com/antoinecorbel7/plex-tunnel/pkg/tunnel"
 )
 
-type Agent struct {
+type Client struct {
 	cfg    Config
 	logger zerolog.Logger
 	client *http.Client
 }
 
-func New(cfg Config, logger zerolog.Logger) *Agent {
-	return &Agent{
+func New(cfg Config, logger zerolog.Logger) *Client {
+	return &Client{
 		cfg:    cfg,
 		logger: logger,
 		client: &http.Client{},
 	}
 }
 
-func (a *Agent) Run(ctx context.Context) error {
+func (c *Client) Run(ctx context.Context) error {
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		err := a.runSession(ctx)
+		err := c.runSession(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -45,8 +45,8 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue
 		}
 
-		delay := BackoffDelay(attempt, a.cfg.MaxReconnectDelay)
-		a.logger.Info().Err(err).Int("attempt", attempt+1).Dur("retry_in", delay).Msg("agent disconnected, reconnecting")
+		delay := BackoffDelay(attempt, c.cfg.MaxReconnectDelay)
+		c.logger.Info().Err(err).Int("attempt", attempt+1).Dur("retry_in", delay).Msg("client disconnected, reconnecting")
 		attempt++
 
 		select {
@@ -57,19 +57,19 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
-func (a *Agent) runSession(ctx context.Context) error {
-	conn, err := tunnel.DialWebSocket(ctx, a.cfg.RelayURL, nil)
+func (c *Client) runSession(ctx context.Context) error {
+	conn, err := tunnel.DialWebSocket(ctx, c.cfg.RelayURL, nil)
 	if err != nil {
 		return fmt.Errorf("connect relay websocket: %w", err)
 	}
 	defer conn.Close()
 
-	a.logger.Info().Str("relay", conn.RemoteAddr()).Msg("connected to relay")
+	c.logger.Info().Str("relay", conn.RemoteAddr()).Msg("connected to relay")
 
 	if err := conn.Send(tunnel.Message{
 		Type:      tunnel.MsgRegister,
-		Token:     a.cfg.Token,
-		Subdomain: a.cfg.Subdomain,
+		Token:     c.cfg.Token,
+		Subdomain: c.cfg.Subdomain,
 	}); err != nil {
 		return fmt.Errorf("send register: %w", err)
 	}
@@ -85,14 +85,14 @@ func (a *Agent) runSession(ctx context.Context) error {
 		return fmt.Errorf("unexpected first message type after register: %d", registerAck.Type)
 	}
 
-	a.logger.Info().Str("subdomain", registerAck.Subdomain).Msg("agent registered")
+	c.logger.Info().Str("subdomain", registerAck.Subdomain).Msg("client registered")
 
 	var lastPong atomic.Int64
 	lastPong.Store(time.Now().UnixNano())
 
 	errCh := make(chan error, 2)
-	go a.readLoop(ctx, conn, &lastPong, errCh)
-	go a.pingLoop(ctx, conn, &lastPong, errCh)
+	go c.readLoop(ctx, conn, &lastPong, errCh)
+	go c.pingLoop(ctx, conn, &lastPong, errCh)
 
 	select {
 	case <-ctx.Done():
@@ -102,7 +102,7 @@ func (a *Agent) runSession(ctx context.Context) error {
 	}
 }
 
-func (a *Agent) readLoop(ctx context.Context, conn *tunnel.WebSocketConnection, lastPong *atomic.Int64, errCh chan<- error) {
+func (c *Client) readLoop(ctx context.Context, conn *tunnel.WebSocketConnection, lastPong *atomic.Int64, errCh chan<- error) {
 	for {
 		msg, err := conn.Receive()
 		if err != nil {
@@ -113,8 +113,8 @@ func (a *Agent) readLoop(ctx context.Context, conn *tunnel.WebSocketConnection, 
 		switch msg.Type {
 		case tunnel.MsgHTTPRequest:
 			go func(request tunnel.Message) {
-				if err := a.handleHTTPRequest(ctx, conn, request); err != nil {
-					a.logger.Warn().Err(err).Str("request_id", request.ID).Msg("failed to process proxied request")
+				if err := c.handleHTTPRequest(ctx, conn, request); err != nil {
+					c.logger.Warn().Err(err).Str("request_id", request.ID).Msg("failed to process proxied request")
 				}
 			}(msg)
 		case tunnel.MsgPing:
@@ -125,18 +125,18 @@ func (a *Agent) readLoop(ctx context.Context, conn *tunnel.WebSocketConnection, 
 		case tunnel.MsgPong:
 			lastPong.Store(time.Now().UnixNano())
 		case tunnel.MsgError:
-			a.logger.Warn().Str("error", msg.Error).Msg("received relay error")
+			c.logger.Warn().Str("error", msg.Error).Msg("received relay error")
 		case tunnel.MsgRegisterAck:
 			// Relay may re-ack after reconnect or internal events.
-			a.logger.Debug().Str("subdomain", msg.Subdomain).Msg("received register ack")
+			c.logger.Debug().Str("subdomain", msg.Subdomain).Msg("received register ack")
 		default:
-			a.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported message type")
+			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported message type")
 		}
 	}
 }
 
-func (a *Agent) pingLoop(ctx context.Context, conn *tunnel.WebSocketConnection, lastPong *atomic.Int64, errCh chan<- error) {
-	ticker := time.NewTicker(a.cfg.PingInterval)
+func (c *Client) pingLoop(ctx context.Context, conn *tunnel.WebSocketConnection, lastPong *atomic.Int64, errCh chan<- error) {
+	ticker := time.NewTicker(c.cfg.PingInterval)
 	defer ticker.Stop()
 
 	for {
@@ -150,27 +150,27 @@ func (a *Agent) pingLoop(ctx context.Context, conn *tunnel.WebSocketConnection, 
 			}
 
 			last := time.Unix(0, lastPong.Load())
-			if time.Since(last) > a.cfg.PongTimeout {
-				sendErr(errCh, fmt.Errorf("pong timeout exceeded (%s)", a.cfg.PongTimeout))
+			if time.Since(last) > c.cfg.PongTimeout {
+				sendErr(errCh, fmt.Errorf("pong timeout exceeded (%s)", c.cfg.PongTimeout))
 				return
 			}
 		}
 	}
 }
 
-func (a *Agent) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketConnection, msg tunnel.Message) error {
+func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketConnection, msg tunnel.Message) error {
 	if msg.ID == "" {
 		return fmt.Errorf("request without id")
 	}
 
-	targetURL, err := resolveTargetURL(a.cfg.PlexTarget, msg.Path)
+	targetURL, err := resolveTargetURL(c.cfg.PlexTarget, msg.Path)
 	if err != nil {
-		return a.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("invalid target path: %v", err))
+		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("invalid target path: %v", err))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, msg.Method, targetURL, bytes.NewReader(msg.Body))
 	if err != nil {
-		return a.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("build proxied request: %v", err))
+		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("build proxied request: %v", err))
 	}
 
 	for key, values := range msg.Headers {
@@ -182,13 +182,13 @@ func (a *Agent) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCon
 		}
 	}
 
-	resp, err := a.client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
-		return a.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("request to plex failed: %v", err))
+		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("request to plex failed: %v", err))
 	}
 	defer resp.Body.Close()
 
-	chunk := make([]byte, a.cfg.ResponseChunkSize)
+	chunk := make([]byte, c.cfg.ResponseChunkSize)
 	headersSent := false
 	for {
 		n, readErr := resp.Body.Read(chunk)
@@ -229,7 +229,7 @@ func (a *Agent) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCon
 	return nil
 }
 
-func (a *Agent) sendProxyError(conn *tunnel.WebSocketConnection, requestID string, status int, msg string) error {
+func (c *Client) sendProxyError(conn *tunnel.WebSocketConnection, requestID string, status int, msg string) error {
 	errMsg := tunnel.Message{
 		Type:   tunnel.MsgHTTPResponse,
 		ID:     requestID,

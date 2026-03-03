@@ -6,11 +6,11 @@ services:
     container_name: plex
     network_mode: host
 
-  plextunnel-agent:
+  plextunnel-client:
     build:
       context: .
-      dockerfile: Dockerfile.agent
-    container_name: plextunnel-agent
+      dockerfile: Dockerfile.client
+    container_name: plextunnel-client
     environment:
       - PLEXTUNNEL_TOKEN=${PLEXTUNNEL_TOKEN}
       - PLEXTUNNEL_RELAY_URL=${PLEXTUNNEL_RELAY_URL}

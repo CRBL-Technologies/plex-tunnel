@@ -1,66 +1,48 @@
-# PlexTunnel
+# PlexTunnel Client
 
-PlexTunnel is a managed tunneling service that gives Plex users secure remote access without opening inbound ports.
+PlexTunnel Client runs next to your Plex server and opens an outbound encrypted tunnel to PlexTunnel Server.
 
-## Components
+## Related Repository
 
-- `plextunnel-agent`: runs near Plex, opens outbound tunnel to relay
-- `plextunnel-relay`: receives public traffic and routes by subdomain
-- `Caddy`: TLS termination and wildcard cert handling
+- Server runtime: [github.com/antoinecorbel7/plex-tunnel-server](https://github.com/antoinecorbel7/plex-tunnel-server)
 
 ## Quick Start
 
-### 1. Build binaries
+### 1. Build
 
 ```bash
 make build
 ```
 
-### 2. Configure relay
+### 2. Configure
 
 ```bash
-cp configs/relay.example.env .env.relay
+cp configs/client.example.env .env.client
 # edit values
 ```
 
-### 3. Configure agent
+### 3. Run
 
 ```bash
-cp configs/agent.example.env .env.agent
-# edit values
+set -a; source .env.client; set +a
+./bin/plextunnel-client
 ```
 
-### 4. Run relay
+## Docker
 
 ```bash
-set -a; source .env.relay; set +a
-./bin/plextunnel-relay
+make docker-client
 ```
 
-### 5. Run agent
+`docker-compose.yml` includes a local Plex container and `plextunnel-client` in host networking mode.
 
-```bash
-set -a; source .env.agent; set +a
-./bin/plextunnel-agent
-```
-
-## Environment Variables
-
-### Agent
+## Configuration
 
 - `PLEXTUNNEL_TOKEN` (required)
 - `PLEXTUNNEL_RELAY_URL` (required, example: `wss://relay.example.com/tunnel`)
 - `PLEXTUNNEL_PLEX_TARGET` (default: `http://127.0.0.1:32400`)
 - `PLEXTUNNEL_SUBDOMAIN` (optional)
 - `PLEXTUNNEL_LOG_LEVEL` (default: `info`)
-
-### Relay
-
-- `PLEXTUNNEL_RELAY_LISTEN` (default: `:8080`)
-- `PLEXTUNNEL_RELAY_TUNNEL_LISTEN` (default: `:8081`)
-- `PLEXTUNNEL_RELAY_DOMAIN` (required)
-- `PLEXTUNNEL_RELAY_TOKENS_FILE` (required)
-- `PLEXTUNNEL_RELAY_LOG_LEVEL` (default: `info`)
 
 ## Development
 

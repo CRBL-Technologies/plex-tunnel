@@ -21,11 +21,11 @@ case "$ARCH" in
     ;;
 esac
 
-BIN="plextunnel-agent-${OS}-${ARCH}"
+BIN="plextunnel-client-${OS}-${ARCH}"
 URL="$REPO_URL/releases/download/$VERSION/$BIN"
 
-curl -fsSL "$URL" -o plextunnel-agent
-chmod +x plextunnel-agent
-sudo mv plextunnel-agent /usr/local/bin/plextunnel-agent
+curl -fsSL "$URL" -o plextunnel-client
+chmod +x plextunnel-client
+sudo mv plextunnel-client /usr/local/bin/plextunnel-client
 
-echo "Installed plextunnel-agent from $URL"
+echo "Installed plextunnel-client from $URL"
