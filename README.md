@@ -39,10 +39,12 @@ make docker-client
 ## Configuration
 
 - `PLEXTUNNEL_TOKEN` (required)
-- `PLEXTUNNEL_RELAY_URL` (required, example: `wss://relay.example.com/tunnel`)
+- `PLEXTUNNEL_SERVER_URL` (required, example: `wss://server.example.com/tunnel`)
 - `PLEXTUNNEL_PLEX_TARGET` (default: `http://127.0.0.1:32400`)
 - `PLEXTUNNEL_SUBDOMAIN` (optional)
 - `PLEXTUNNEL_LOG_LEVEL` (default: `info`)
+
+`PLEXTUNNEL_RELAY_URL` is still accepted as a fallback for backward compatibility.
 
 ## Development
 

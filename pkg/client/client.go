@@ -58,13 +58,13 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) runSession(ctx context.Context) error {
-	conn, err := tunnel.DialWebSocket(ctx, c.cfg.RelayURL, nil)
+	conn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
-		return fmt.Errorf("connect relay websocket: %w", err)
+		return fmt.Errorf("connect server websocket: %w", err)
 	}
 	defer conn.Close()
 
-	c.logger.Info().Str("relay", conn.RemoteAddr()).Msg("connected to relay")
+	c.logger.Info().Str("server", conn.RemoteAddr()).Msg("connected to server")
 
 	if err := conn.Send(tunnel.Message{
 		Type:      tunnel.MsgRegister,
@@ -79,7 +79,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		return fmt.Errorf("receive register ack: %w", err)
 	}
 	if registerAck.Type == tunnel.MsgError {
-		return fmt.Errorf("relay rejected registration: %s", registerAck.Error)
+		return fmt.Errorf("server rejected registration: %s", registerAck.Error)
 	}
 	if registerAck.Type != tunnel.MsgRegisterAck {
 		return fmt.Errorf("unexpected first message type after register: %d", registerAck.Type)
@@ -125,9 +125,9 @@ func (c *Client) readLoop(ctx context.Context, conn *tunnel.WebSocketConnection,
 		case tunnel.MsgPong:
 			lastPong.Store(time.Now().UnixNano())
 		case tunnel.MsgError:
-			c.logger.Warn().Str("error", msg.Error).Msg("received relay error")
+			c.logger.Warn().Str("error", msg.Error).Msg("received server error")
 		case tunnel.MsgRegisterAck:
-			// Relay may re-ack after reconnect or internal events.
+			// Server may re-ack after reconnect or internal events.
 			c.logger.Debug().Str("subdomain", msg.Subdomain).Msg("received register ack")
 		default:
 			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported message type")

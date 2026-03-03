@@ -13,7 +13,7 @@ services:
     container_name: plextunnel-client
     environment:
       - PLEXTUNNEL_TOKEN=${PLEXTUNNEL_TOKEN}
-      - PLEXTUNNEL_RELAY_URL=${PLEXTUNNEL_RELAY_URL}
+      - PLEXTUNNEL_SERVER_URL=${PLEXTUNNEL_SERVER_URL}
       - PLEXTUNNEL_PLEX_TARGET=${PLEXTUNNEL_PLEX_TARGET:-http://127.0.0.1:32400}
       - PLEXTUNNEL_SUBDOMAIN=${PLEXTUNNEL_SUBDOMAIN:-}
     restart: unless-stopped

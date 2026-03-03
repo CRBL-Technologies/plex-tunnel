@@ -10,7 +10,7 @@ import (
 
 type Config struct {
 	Token             string
-	RelayURL          string
+	ServerURL         string
 	PlexTarget        string
 	Subdomain         string
 	LogLevel          string
@@ -23,7 +23,7 @@ type Config struct {
 func LoadConfig() (Config, error) {
 	cfg := Config{
 		Token:             strings.TrimSpace(os.Getenv("PLEXTUNNEL_TOKEN")),
-		RelayURL:          strings.TrimSpace(os.Getenv("PLEXTUNNEL_RELAY_URL")),
+		ServerURL:         getFirstEnv("PLEXTUNNEL_SERVER_URL", "PLEXTUNNEL_RELAY_URL"),
 		PlexTarget:        getenvDefault("PLEXTUNNEL_PLEX_TARGET", "http://127.0.0.1:32400"),
 		Subdomain:         strings.TrimSpace(os.Getenv("PLEXTUNNEL_SUBDOMAIN")),
 		LogLevel:          getenvDefault("PLEXTUNNEL_LOG_LEVEL", "info"),
@@ -36,8 +36,8 @@ func LoadConfig() (Config, error) {
 	if cfg.Token == "" {
 		return Config{}, fmt.Errorf("PLEXTUNNEL_TOKEN is required")
 	}
-	if cfg.RelayURL == "" {
-		return Config{}, fmt.Errorf("PLEXTUNNEL_RELAY_URL is required")
+	if cfg.ServerURL == "" {
+		return Config{}, fmt.Errorf("PLEXTUNNEL_SERVER_URL is required")
 	}
 
 	if pingValue := strings.TrimSpace(os.Getenv("PLEXTUNNEL_PING_INTERVAL")); pingValue != "" {
@@ -83,4 +83,13 @@ func getenvDefault(key string, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func getFirstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
