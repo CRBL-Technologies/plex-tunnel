@@ -44,7 +44,17 @@ make docker-client
 - `PLEXTUNNEL_SUBDOMAIN` (optional)
 - `PLEXTUNNEL_LOG_LEVEL` (default: `info`)
 
-`PLEXTUNNEL_RELAY_URL` is still accepted as a fallback for backward compatibility.
+## CI/CD
+
+GitHub Actions runs tests on pull requests and on pushes to `main`.
+On pushes to `main`, it builds and pushes `Dockerfile.client` to your private registry.
+
+Set these repository secrets:
+
+- `PRIVATE_DOCKER_REGISTRY` (example: `registry.example.com`)
+- `PRIVATE_DOCKER_USERNAME`
+- `PRIVATE_DOCKER_PASSWORD`
+- `PRIVATE_DOCKER_IMAGE` (full image path without tag, example: `registry.example.com/team/plextunnel-client`)
 
 ## Development
 

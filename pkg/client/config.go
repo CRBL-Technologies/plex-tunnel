@@ -23,7 +23,7 @@ type Config struct {
 func LoadConfig() (Config, error) {
 	cfg := Config{
 		Token:             strings.TrimSpace(os.Getenv("PLEXTUNNEL_TOKEN")),
-		ServerURL:         getFirstEnv("PLEXTUNNEL_SERVER_URL", "PLEXTUNNEL_RELAY_URL"),
+		ServerURL:         strings.TrimSpace(os.Getenv("PLEXTUNNEL_SERVER_URL")),
 		PlexTarget:        getenvDefault("PLEXTUNNEL_PLEX_TARGET", "http://127.0.0.1:32400"),
 		Subdomain:         strings.TrimSpace(os.Getenv("PLEXTUNNEL_SUBDOMAIN")),
 		LogLevel:          getenvDefault("PLEXTUNNEL_LOG_LEVEL", "info"),
@@ -83,13 +83,4 @@ func getenvDefault(key string, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func getFirstEnv(keys ...string) string {
-	for _, key := range keys {
-		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-			return value
-		}
-	}
-	return ""
 }
