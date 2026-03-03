@@ -30,11 +30,25 @@ set -a; source .env.client; set +a
 
 ## Docker
 
+Build local image (optional):
+
 ```bash
 make docker-client
 ```
 
-`docker-compose.yml` includes a local Plex container and `plextunnel-client` in host networking mode.
+`docker-compose.yml` pulls `ghcr.io/antoinecorbel7/plex-tunnel:latest` by default.
+
+```bash
+docker login ghcr.io -u antoinecorbel7
+docker compose --env-file .env pull
+docker compose --env-file .env up -d plextunnel-client
+```
+
+Override image if needed:
+
+```bash
+PLEXTUNNEL_CLIENT_IMAGE=ghcr.io/antoinecorbel7/plex-tunnel:sha-<commit> docker compose --env-file .env up -d plextunnel-client
+```
 
 ## Configuration
 
