@@ -1,0 +1,14 @@
+*.yourdomain.tld {
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+
+    @tunnel path /tunnel
+    handle @tunnel {
+        reverse_proxy localhost:8081
+    }
+
+    handle {
+        reverse_proxy localhost:8080
+    }
+}
