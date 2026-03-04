@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultReadTimeout  = 70 * time.Second
-	defaultWriteTimeout = 15 * time.Second
+	defaultWriteTimeout = 60 * time.Second
 	defaultReadLimit    = int64(8 * 1024 * 1024)
 )
 
@@ -145,11 +145,11 @@ func newWebSocketConnection(conn *websocket.Conn, remoteAddr string, readTimeout
 }
 
 func (c *WebSocketConnection) Send(msg Message) error {
-	ctx, cancel := context.WithTimeout(context.Background(), c.writeTimeout)
-	defer cancel()
-
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.writeTimeout)
+	defer cancel()
 
 	if err := wsjson.Write(ctx, c.conn, msg); err != nil {
 		return fmt.Errorf("send websocket message: %w", err)
