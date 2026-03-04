@@ -17,6 +17,7 @@ import (
 const (
 	defaultReadTimeout  = 70 * time.Second
 	defaultWriteTimeout = 15 * time.Second
+	defaultReadLimit    = int64(8 * 1024 * 1024)
 )
 
 type WebSocketTransport struct {
@@ -131,6 +132,10 @@ type WebSocketConnection struct {
 }
 
 func newWebSocketConnection(conn *websocket.Conn, remoteAddr string, readTimeout, writeTimeout time.Duration) *WebSocketConnection {
+	// nhooyr websocket defaults to a low read limit (~32KiB), which is too small
+	// for proxied HTTP chunks and causes read-limited disconnects.
+	conn.SetReadLimit(defaultReadLimit)
+
 	return &WebSocketConnection{
 		conn:         conn,
 		remoteAddr:   remoteAddr,
