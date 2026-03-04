@@ -26,11 +26,11 @@ func New(cfg Config, logger zerolog.Logger) *Client {
 		cfg:    cfg,
 		logger: logger,
 		client: &http.Client{
-			Timeout: 2 * time.Minute,
 			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   10,
+				IdleConnTimeout:       90 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
 			},
 		},
 	}
