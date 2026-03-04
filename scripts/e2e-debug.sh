@@ -8,6 +8,7 @@ TEST_HOST="${TEST_HOST:-myserver.local.test}"
 SERVER_CONTEXT="${PLEXTUNNEL_SERVER_CONTEXT:-/tmp/plex-tunnel-server}"
 
 cleanup() {
+  rm -f /tmp/plextunnel-e2e-response.txt
   if [ "${KEEP_STACK:-0}" = "1" ]; then
     return
   fi
@@ -35,9 +36,12 @@ echo "Waiting for end-to-end tunnel response..."
 i=0
 while [ "$i" -lt "$TIMEOUT_SECONDS" ]; do
   if curl -fsS -H "Host: $TEST_HOST" "http://127.0.0.1:$HOST_PORT/" >/tmp/plextunnel-e2e-response.txt 2>/dev/null; then
-    echo "E2E check passed"
-    echo "Response: $(cat /tmp/plextunnel-e2e-response.txt)"
-    exit 0
+    if grep -q "mock-plex-ok" /tmp/plextunnel-e2e-response.txt; then
+      echo "E2E check passed"
+      echo "Response: $(cat /tmp/plextunnel-e2e-response.txt)"
+      exit 0
+    fi
+    echo "Got HTTP 200 but unexpected body: $(cat /tmp/plextunnel-e2e-response.txt)"
   fi
   i=$((i + 1))
   sleep 1
