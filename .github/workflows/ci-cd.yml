@@ -59,3 +59,16 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    name: Trigger Portainer Stack Redeploy
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name == 'push' && secrets.PORTAINER_CLIENT_STACK_WEBHOOK_URL != ''
+    steps:
+      - name: Trigger webhook
+        run: |
+          curl --fail --silent --show-error \
+            --max-time 30 \
+            --request POST \
+            "${{ secrets.PORTAINER_CLIENT_STACK_WEBHOOK_URL }}"
