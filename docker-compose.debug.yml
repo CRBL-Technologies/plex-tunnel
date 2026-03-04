@@ -16,7 +16,11 @@ services:
     ports:
       - "18080:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "nc -z 127.0.0.1 8080 && nc -z 127.0.0.1 8081",
+        ]
       interval: 2s
       timeout: 3s
       retries: 10
