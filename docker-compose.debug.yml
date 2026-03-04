@@ -1,0 +1,31 @@
+services:
+  mock-plex:
+    image: hashicorp/http-echo:1.0.0
+    command: ["-listen=:32400", "-text=mock-plex-ok"]
+
+  server:
+    image: ${PLEXTUNNEL_SERVER_IMAGE:-ghcr.io/antoinecorbel7/plex-tunnel-server:latest}
+    environment:
+      PLEXTUNNEL_SERVER_LISTEN: :8080
+      PLEXTUNNEL_SERVER_TUNNEL_LISTEN: :8081
+      PLEXTUNNEL_SERVER_DOMAIN: local.test
+      PLEXTUNNEL_SERVER_TOKENS_FILE: /etc/plextunnel/tokens.json
+      PLEXTUNNEL_SERVER_LOG_LEVEL: debug
+    volumes:
+      - ./testdata/tokens.debug.json:/etc/plextunnel/tokens.json:ro
+    ports:
+      - "18080:8080"
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    depends_on:
+      - server
+      - mock-plex
+    environment:
+      PLEXTUNNEL_TOKEN: dev-token-123
+      PLEXTUNNEL_SERVER_URL: ws://server:8081/tunnel
+      PLEXTUNNEL_PLEX_TARGET: http://mock-plex:32400
+      PLEXTUNNEL_SUBDOMAIN: myserver
+      PLEXTUNNEL_LOG_LEVEL: debug

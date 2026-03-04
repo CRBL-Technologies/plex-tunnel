@@ -139,19 +139,22 @@ func (c *Client) pingLoop(ctx context.Context, conn *tunnel.WebSocketConnection,
 	ticker := time.NewTicker(c.cfg.PingInterval)
 	defer ticker.Stop()
 
+	// A pong is expected no later than one full ping interval plus timeout.
+	disconnectAfter := c.cfg.PingInterval + c.cfg.PongTimeout
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := conn.Send(tunnel.Message{Type: tunnel.MsgPing}); err != nil {
-				sendErr(errCh, fmt.Errorf("send ping: %w", err))
+			last := time.Unix(0, lastPong.Load())
+			if time.Since(last) > disconnectAfter {
+				sendErr(errCh, fmt.Errorf("pong timeout exceeded (%s)", disconnectAfter))
 				return
 			}
 
-			last := time.Unix(0, lastPong.Load())
-			if time.Since(last) > c.cfg.PongTimeout {
-				sendErr(errCh, fmt.Errorf("pong timeout exceeded (%s)", c.cfg.PongTimeout))
+			if err := conn.Send(tunnel.Message{Type: tunnel.MsgPing}); err != nil {
+				sendErr(errCh, fmt.Errorf("send ping: %w", err))
 				return
 			}
 		}
