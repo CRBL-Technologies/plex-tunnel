@@ -1,4 +1,4 @@
-.PHONY: build-client build test docker-client clean release-client
+.PHONY: build-client build test docker-client clean release-client debug-up debug-down debug-logs debug-test
 
 build-client:
 	go build -o bin/plextunnel-client ./cmd/client
@@ -20,3 +20,15 @@ release-client:
 	GOOS=darwin GOARCH=amd64 go build -o bin/plextunnel-client-darwin-amd64 ./cmd/client
 	GOOS=darwin GOARCH=arm64 go build -o bin/plextunnel-client-darwin-arm64 ./cmd/client
 	GOOS=windows GOARCH=amd64 go build -o bin/plextunnel-client-windows-amd64.exe ./cmd/client
+
+debug-up:
+	docker compose -f docker-compose.debug.yml up -d --build
+
+debug-down:
+	docker compose -f docker-compose.debug.yml down -v
+
+debug-logs:
+	docker compose -f docker-compose.debug.yml logs -f --tail=200
+
+debug-test: ## Run e2e test (requires PLEXTUNNEL_SERVER_IMAGE or server source at PLEXTUNNEL_SERVER_CONTEXT)
+	./scripts/e2e-debug.sh

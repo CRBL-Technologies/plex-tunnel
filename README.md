@@ -73,3 +73,27 @@ No extra Docker credentials are required in repo secrets for same-repo publishin
 ```bash
 make test
 ```
+
+## Local Debug Environment
+
+Run a full local stack (server + client + mock Plex) to validate end-to-end behavior:
+
+```bash
+make debug-test
+```
+
+Useful commands:
+
+```bash
+make debug-up
+make debug-logs
+make debug-down
+```
+
+Notes:
+
+- The debug stack uses [docker-compose.debug.yml](/Users/antoine/Documents/github/plex-tunnel/docker-compose.debug.yml).
+- Test token/subdomain live in [testdata/tokens.debug.json](/Users/antoine/Documents/github/plex-tunnel/testdata/tokens.debug.json).
+- `make debug-test` auto-builds a local server image from `/tmp/plex-tunnel-server` by default.
+- Override server source path with: `PLEXTUNNEL_SERVER_CONTEXT=/path/to/plex-tunnel-server make debug-test`
+- Or use a prebuilt image directly: `PLEXTUNNEL_SERVER_IMAGE=ghcr.io/antoinecorbel7/plex-tunnel-server:latest make debug-test`
