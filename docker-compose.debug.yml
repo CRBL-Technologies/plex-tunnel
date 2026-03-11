@@ -41,3 +41,4 @@ services:
       PLEXTUNNEL_PLEX_TARGET: http://mock-plex:32400
       PLEXTUNNEL_SUBDOMAIN: myserver
       PLEXTUNNEL_LOG_LEVEL: debug
+      PLEXTUNNEL_UI_LISTEN: ""

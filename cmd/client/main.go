@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -31,11 +35,42 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	runner := client.New(cfg, logger)
-	if err := runner.Run(ctx); err != nil {
-		logger.Error().Err(err).Msg("client stopped with error")
-		os.Exit(1)
+	controller := newClientController(ctx, cfg, logger)
+	controller.Start()
+	defer controller.Stop()
+
+	uiListen := getenvDefault("PLEXTUNNEL_UI_LISTEN", "127.0.0.1:9090")
+	if uiListen != "" {
+		srv := &http.Server{
+			Addr:    uiListen,
+			Handler: newUIHandler(controller, logger),
+		}
+
+		go func() {
+			logger.Info().Str("addr", uiListen).Msg("client web UI listening")
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error().Err(err).Msg("client web UI stopped with error")
+				cancel()
+			}
+		}()
+
+		<-ctx.Done()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logger.Warn().Err(err).Msg("client web UI shutdown error")
+		}
+	} else {
+		<-ctx.Done()
 	}
 
 	logger.Info().Msg("client shutdown complete")
+}
+
+func getenvDefault(key string, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }

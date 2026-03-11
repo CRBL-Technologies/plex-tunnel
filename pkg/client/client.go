@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,9 @@ type Client struct {
 	cfg    Config
 	logger zerolog.Logger
 	client *http.Client
+
+	stateMu sync.RWMutex
+	state   ConnectionStatus
 }
 
 func New(cfg Config, logger zerolog.Logger) *Client {
@@ -36,8 +40,25 @@ func New(cfg Config, logger zerolog.Logger) *Client {
 	}
 }
 
+func (c *Client) SnapshotStatus() ConnectionStatus {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return c.state
+}
+
+func (c *Client) updateStatus(fn func(*ConnectionStatus)) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	fn(&c.state)
+}
+
 func (c *Client) Run(ctx context.Context) error {
 	attempt := 0
+	c.updateStatus(func(s *ConnectionStatus) {
+		s.Connected = false
+		s.ReconnectAttempt = 0
+		s.LastError = ""
+	})
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -53,6 +74,12 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 
 		delay := BackoffDelay(attempt, c.cfg.MaxReconnectDelay)
+		c.updateStatus(func(s *ConnectionStatus) {
+			s.Connected = false
+			s.LastError = err.Error()
+			s.ReconnectAttempt = attempt + 1
+			s.LastDisconnectedAt = time.Now()
+		})
 		c.logger.Info().Err(err).Int("attempt", attempt+1).Dur("retry_in", delay).Msg("client disconnected, reconnecting")
 		attempt++
 
@@ -71,6 +98,13 @@ func (c *Client) runSession(ctx context.Context) error {
 	}
 	defer conn.Close()
 
+	c.updateStatus(func(s *ConnectionStatus) {
+		s.Connected = true
+		s.Server = conn.RemoteAddr()
+		s.LastConnectedAt = time.Now()
+		s.LastError = ""
+		s.ReconnectAttempt = 0
+	})
 	c.logger.Info().Str("server", conn.RemoteAddr()).Msg("connected to server")
 
 	if err := conn.Send(tunnel.Message{
@@ -92,6 +126,9 @@ func (c *Client) runSession(ctx context.Context) error {
 		return fmt.Errorf("unexpected first message type after register: %d", registerAck.Type)
 	}
 
+	c.updateStatus(func(s *ConnectionStatus) {
+		s.Subdomain = registerAck.Subdomain
+	})
 	c.logger.Info().Str("subdomain", registerAck.Subdomain).Msg("client registered")
 
 	var lastPong atomic.Int64

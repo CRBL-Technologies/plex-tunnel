@@ -57,6 +57,17 @@ PLEXTUNNEL_CLIENT_IMAGE=ghcr.io/antoinecorbel7/plex-tunnel:sha-<commit> docker c
 - `PLEXTUNNEL_PLEX_TARGET` (default: `http://127.0.0.1:32400`)
 - `PLEXTUNNEL_SUBDOMAIN` (optional)
 - `PLEXTUNNEL_LOG_LEVEL` (default: `info`)
+- `PLEXTUNNEL_UI_LISTEN` (default: `127.0.0.1:9090`, set empty to disable UI)
+
+## Web UI
+
+Client now exposes a small local status/settings page by default:
+
+- URL: `http://127.0.0.1:9090/`
+- Status: connected/disconnected, subdomain, last errors, reconnect attempts
+- Settings: token, server URL, subdomain, Plex target, log level
+
+Applying settings from the UI restarts the client runtime immediately.
 
 ## CI/CD
 
