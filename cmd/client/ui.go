@@ -215,7 +215,14 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     }
     .row { display: flex; flex-wrap: wrap; gap: 12px; }
     .item { flex: 1 1 220px; }
-    .label { color: var(--muted); font-size: .85rem; display: block; margin-bottom: 4px; }
+    .label {
+      color: var(--muted);
+      font-size: .85rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
     .value { font-family: "IBM Plex Mono", Menlo, monospace; font-size: .95rem; word-break: break-word; }
     .badge {
       display: inline-block;
@@ -264,31 +271,31 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       </h2>
       <div class="row">
         <div class="item">
-          <span class="label">Status</span>
+          <span class="label">Status <span class="info-bubble" tabindex="0" data-tip="Current websocket/tunnel state between this client and the server.">i</span></span>
           {{if .Status.Connected}}<span class="badge ok">CONNECTED</span>{{else}}<span class="badge bad">DISCONNECTED</span>{{end}}
         </div>
         <div class="item">
-          <span class="label">Server</span>
+          <span class="label">Server <span class="info-bubble" tabindex="0" data-tip="Remote tunnel server endpoint currently connected.">i</span></span>
           <span class="value">{{.Status.Server}}</span>
         </div>
         <div class="item">
-          <span class="label">Subdomain</span>
+          <span class="label">Subdomain <span class="info-bubble" tabindex="0" data-tip="Assigned subdomain for incoming traffic routing.">i</span></span>
           <span class="value">{{.Status.Subdomain}}</span>
         </div>
         <div class="item">
-          <span class="label">Reconnect Attempt</span>
+          <span class="label">Reconnect Attempt <span class="info-bubble" tabindex="0" data-tip="Number of current retry attempt after a disconnection.">i</span></span>
           <span class="value">{{.Status.ReconnectAttempt}}</span>
         </div>
         <div class="item">
-          <span class="label">Last Connected</span>
+          <span class="label">Last Connected <span class="info-bubble" tabindex="0" data-tip="Timestamp of the last successful connection to server.">i</span></span>
           <span class="value">{{formatTime .Status.LastConnectedAt}}</span>
         </div>
         <div class="item">
-          <span class="label">Last Disconnected</span>
+          <span class="label">Last Disconnected <span class="info-bubble" tabindex="0" data-tip="Timestamp of the latest disconnect event.">i</span></span>
           <span class="value">{{formatTime .Status.LastDisconnectedAt}}</span>
         </div>
         <div class="item full">
-          <span class="label">Last Error</span>
+          <span class="label">Last Error <span class="info-bubble" tabindex="0" data-tip="Most recent connection/proxy error reported by the client.">i</span></span>
           <span class="value">{{if .Status.LastError}}{{.Status.LastError}}{{else}}-{{end}}</span>
         </div>
       </div>
@@ -301,23 +308,23 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       </h2>
       <form method="post" action="/settings">
         <div>
-          <span class="label">Server URL</span>
+          <span class="label">Server URL <span class="info-bubble" tabindex="0" data-tip="Tunnel websocket endpoint, usually wss://your-subdomain.domain.tld/tunnel.">i</span></span>
           <input name="server_url" value="{{.Config.ServerURL}}" required>
         </div>
         <div>
-          <span class="label">Subdomain</span>
+          <span class="label">Subdomain <span class="info-bubble" tabindex="0" data-tip="Requested client subdomain. Must match token rules on server.">i</span></span>
           <input name="subdomain" value="{{.Config.Subdomain}}">
         </div>
         <div class="full">
-          <span class="label">Server Token</span>
+          <span class="label">Server Token <span class="info-bubble" tabindex="0" data-tip="Authentication token from server tokens.json. Keep this secret.">i</span></span>
           <input type="password" name="token" value="{{.Config.Token}}" required>
         </div>
         <div>
-          <span class="label">Plex Target</span>
+          <span class="label">Plex Target <span class="info-bubble" tabindex="0" data-tip="Local Plex URL this client forwards requests to (for host network: http://127.0.0.1:32400).">i</span></span>
           <input name="plex_target" value="{{.Config.PlexTarget}}">
         </div>
         <div>
-          <span class="label">Log Level</span>
+          <span class="label">Log Level <span class="info-bubble" tabindex="0" data-tip="Logging verbosity: debug, info, warn, error.">i</span></span>
           <input name="log_level" value="{{.Config.LogLevel}}">
         </div>
         <div class="full">
