@@ -166,6 +166,53 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     }
     h1 { margin: 0 0 8px; font-size: 1.4rem; }
     h2 { margin: 0 0 12px; font-size: 1.05rem; color: var(--muted); }
+    .section-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .info-bubble {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: help;
+      user-select: none;
+      outline: none;
+    }
+    .info-bubble::before {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      bottom: 130%;
+      transform: translateX(-50%);
+      min-width: 220px;
+      max-width: 320px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0d141e;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: normal;
+      text-align: left;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .12s ease-in-out;
+      z-index: 20;
+    }
+    .info-bubble:hover::before,
+    .info-bubble:focus::before {
+      opacity: 1;
+    }
     .row { display: flex; flex-wrap: wrap; gap: 12px; }
     .item { flex: 1 1 220px; }
     .label { color: var(--muted); font-size: .85rem; display: block; margin-bottom: 4px; }
@@ -211,7 +258,10 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
   <div class="wrap">
     <div class="panel">
       <h1>PlexTunnel Client</h1>
-      <h2>Connection Status (auto-refresh every 5s)</h2>
+      <h2 class="section-title">
+        Connection Status
+        <span class="info-bubble" tabindex="0" data-tip="Shows live tunnel state. This page auto-refreshes every 5 seconds.">i</span>
+      </h2>
       <div class="row">
         <div class="item">
           <span class="label">Status</span>
@@ -245,7 +295,10 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     </div>
 
     <div class="panel">
-      <h2>Runtime Settings (applied immediately)</h2>
+      <h2 class="section-title">
+        Runtime Settings
+        <span class="info-bubble" tabindex="0" data-tip="Changes are applied immediately and restart the client connection loop. Keep token and server URL matched with server-side config.">i</span>
+      </h2>
       <form method="post" action="/settings">
         <div>
           <span class="label">Server URL</span>
