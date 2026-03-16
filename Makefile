@@ -30,5 +30,5 @@ debug-down:
 debug-logs:
 	docker compose -f docker-compose.debug.yml logs -f --tail=200
 
-debug-test: ## Run e2e test (requires PLEXTUNNEL_SERVER_IMAGE or server source at PLEXTUNNEL_SERVER_CONTEXT)
+debug-test: ## Run e2e test (auto-clones/pulls server source unless PLEXTUNNEL_SERVER_IMAGE is set)
 	./scripts/e2e-debug.sh
