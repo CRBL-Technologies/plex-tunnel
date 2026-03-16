@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -108,22 +109,33 @@ func (c *Client) runSession(ctx context.Context) error {
 	c.logger.Info().Str("server", conn.RemoteAddr()).Msg("connected to server")
 
 	if err := conn.Send(tunnel.Message{
-		Type:      tunnel.MsgRegister,
-		Token:     c.cfg.Token,
-		Subdomain: c.cfg.Subdomain,
+		Type:            tunnel.MsgRegister,
+		Token:           c.cfg.Token,
+		Subdomain:       c.cfg.Subdomain,
+		ProtocolVersion: tunnel.ProtocolVersion,
 	}); err != nil {
-		return fmt.Errorf("send register: %w", err)
+		return fmt.Errorf("Connection failed during handshake. The server may be running an older protocol version. Ensure both client and server are updated. Details: %w", err)
 	}
 
 	registerAck, err := conn.Receive()
 	if err != nil {
-		return fmt.Errorf("receive register ack: %w", err)
+		return fmt.Errorf("Connection failed during handshake. The server may be running an older protocol version. Ensure both client and server are updated. Details: %w", err)
 	}
 	if registerAck.Type == tunnel.MsgError {
+		if strings.Contains(strings.ToLower(registerAck.Error), "unsupported tunnel protocol version") {
+			return fmt.Errorf("Server requires a different protocol version. Update your client or server. Client protocol version: %d", tunnel.ProtocolVersion)
+		}
 		return fmt.Errorf("server rejected registration: %s", registerAck.Error)
 	}
 	if registerAck.Type != tunnel.MsgRegisterAck {
 		return fmt.Errorf("unexpected first message type after register: %d", registerAck.Type)
+	}
+	if registerAck.ProtocolVersion != tunnel.ProtocolVersion {
+		return fmt.Errorf(
+			"Server requires a different protocol version. Update your client or server. Client protocol version: %d, server protocol version: %d",
+			tunnel.ProtocolVersion,
+			registerAck.ProtocolVersion,
+		)
 	}
 
 	c.updateStatus(func(s *ConnectionStatus) {
@@ -172,7 +184,20 @@ func (c *Client) readLoop(ctx context.Context, conn *tunnel.WebSocketConnection,
 			c.logger.Warn().Str("error", msg.Error).Msg("received server error")
 		case tunnel.MsgRegisterAck:
 			// Server may re-ack after reconnect or internal events.
+			if msg.ProtocolVersion != tunnel.ProtocolVersion {
+				sendErr(
+					errCh,
+					fmt.Errorf(
+						"Server requires a different protocol version. Update your client or server. Client protocol version: %d, server protocol version: %d",
+						tunnel.ProtocolVersion,
+						msg.ProtocolVersion,
+					),
+				)
+				return
+			}
 			c.logger.Debug().Str("subdomain", msg.Subdomain).Msg("received register ack")
+		case tunnel.MsgWSOpen, tunnel.MsgWSFrame, tunnel.MsgWSClose, tunnel.MsgKeyExchange:
+			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported websocket message type")
 		default:
 			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported message type")
 		}

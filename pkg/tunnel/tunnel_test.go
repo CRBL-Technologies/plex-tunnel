@@ -14,14 +14,24 @@ func TestMessageValidate(t *testing.T) {
 		{
 			name: "register ok",
 			msg: Message{
-				Type:  MsgRegister,
-				Token: "abc",
+				Type:            MsgRegister,
+				Token:           "abc",
+				ProtocolVersion: ProtocolVersion,
 			},
 		},
 		{
 			name: "register missing token",
 			msg: Message{
-				Type: MsgRegister,
+				Type:            MsgRegister,
+				ProtocolVersion: ProtocolVersion,
+			},
+			wantErr: true,
+		},
+		{
+			name: "register missing protocol version",
+			msg: Message{
+				Type:  MsgRegister,
+				Token: "abc",
 			},
 			wantErr: true,
 		},

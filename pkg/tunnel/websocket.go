@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 )
 
 const (
@@ -151,7 +150,12 @@ func (c *WebSocketConnection) Send(msg Message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.writeTimeout)
 	defer cancel()
 
-	if err := wsjson.Write(ctx, c.conn, msg); err != nil {
+	payload, err := encodeMessagePayload(msg)
+	if err != nil {
+		return fmt.Errorf("encode websocket message: %w", err)
+	}
+
+	if err := c.conn.Write(ctx, websocket.MessageBinary, payload); err != nil {
 		return fmt.Errorf("send websocket message: %w", err)
 	}
 	return nil
@@ -165,10 +169,20 @@ func (c *WebSocketConnection) Receive() (Message, error) {
 	}
 	defer cancel()
 
-	var msg Message
-	if err := wsjson.Read(ctx, c.conn, &msg); err != nil {
+	msgType, payload, err := c.conn.Read(ctx)
+	if err != nil {
 		return Message{}, fmt.Errorf("receive websocket message: %w", err)
 	}
+
+	if msgType != websocket.MessageBinary {
+		return Message{}, fmt.Errorf("expected binary frame")
+	}
+
+	msg, err := decodeMessagePayload(payload)
+	if err != nil {
+		return Message{}, fmt.Errorf("decode websocket message: %w", err)
+	}
+
 	return msg, nil
 }
 
