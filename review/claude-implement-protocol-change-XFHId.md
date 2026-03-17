@@ -3,7 +3,52 @@
 **Branch:** `claude/implement-protocol-change-XFHId`
 **Compared to:** `main`
 **Reviewer:** Claude
-**Last updated:** 2026-03-16 (round 1)
+**Last updated:** 2026-03-17 (round 2)
+
+---
+
+## Round 2 — Follow-up changes (commit `70ad3bc`)
+
+### Changes reviewed
+
+| File | Change |
+|---|---|
+| `pkg/tunnel/message.go` | Split `Validate()` into `Validate()` (lenient, for decode) and `ValidateForSend()` (strict, for encode) |
+| `pkg/tunnel/frame.go` | `encodeMessagePayload` now calls `ValidateForSend()`; added clarifying comment on `maxFrameSectionLength` |
+| `pkg/tunnel/tunnel_test.go` | Updated existing test to reflect lenient decode behaviour; added `TestMessageValidateForSend` |
+| `specs/client-binary-protocol-upgrade.md` | Added note that WebSocket/KeyExchange types are stubs not yet functional end-to-end |
+
+### Issues Resolved
+
+- **Issue 1 (blocking)** — `Validate()` no longer rejects `ProtocolVersion == 0` on receive. Old servers that omit the field will decode successfully; the client then catches the mismatch at the application layer with a clear error message. ✅
+- **Issue 2 (blocking)** — Same fix applies symmetrically for `MsgRegister` from old clients. ✅
+- **Issue 3 (minor)** — Comment added to `frame.go:12` explaining the `uint32` cap. ✅
+- **Issue 4 (observation)** — Spec now explicitly documents stub types as not yet functional. ✅
+
+### New issues
+
+None. The `ValidateForSend` / `Validate` split is clean and well-tested.
+
+### Test Results (round 2)
+
+```
+ok  	github.com/antoinecorbel7/plex-tunnel/pkg/tunnel	1.032s  (race detector)
+ok  	github.com/antoinecorbel7/plex-tunnel/pkg/client	6.156s  (race detector)
+```
+
+All tests pass with `-race`. No new failures.
+
+### Verdict (round 2)
+
+**Approved.** All blocking issues from round 1 are resolved. The design is solid, backward-compatible, and well-covered by tests. Ready to merge once the server-side is updated to set `ProtocolVersion` in `MsgRegisterAck`.
+
+---
+
+<!-- Round 1 preserved below -->
+
+---
+
+**Last updated (round 1):** 2026-03-16
 
 ---
 
