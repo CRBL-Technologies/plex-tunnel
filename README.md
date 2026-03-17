@@ -106,8 +106,11 @@ Notes:
 - The debug stack uses [docker-compose.debug.yml](docker-compose.debug.yml).
 - Test token/subdomain live in [testdata/tokens.debug.json](testdata/tokens.debug.json).
 - `make debug-test` auto-clones (or pulls) the server repo into `/tmp/plex-tunnel-server` by default, then builds a local server image.
+- If `PLEXTUNNEL_SERVER_IMAGE` is set but cannot be pulled, the script automatically falls back to source clone/build.
 - Override server source path with: `PLEXTUNNEL_SERVER_CONTEXT=/path/to/plex-tunnel-server make debug-test`
 - Override server repo/ref with:
   - `PLEXTUNNEL_SERVER_REPO_URL=git@github.com:<org>/<repo>.git` (or HTTPS URL with credentials/token)
   - `PLEXTUNNEL_SERVER_REF=<branch-or-tag>`
+- For private server repos over HTTPS, provide a token:
+  - `PLEXTUNNEL_SERVER_REPO_TOKEN=<github_token_or_pat>`
 - Or use a prebuilt image directly: `PLEXTUNNEL_SERVER_IMAGE=ghcr.io/antoinecorbel7/plex-tunnel-server:latest make debug-test`

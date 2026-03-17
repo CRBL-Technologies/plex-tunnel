@@ -35,6 +35,7 @@ jobs:
     timeout-minutes: 20
     env:
       PLEXTUNNEL_SERVER_IMAGE: ghcr.io/antoinecorbel7/plex-tunnel-server:latest
+      PLEXTUNNEL_SERVER_REPO_TOKEN: ${{ secrets.PLEXTUNNEL_SERVER_REPO_TOKEN || secrets.GHCR_TOKEN || github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +44,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ secrets.GHCR_USERNAME || github.actor }}
           password: ${{ secrets.GHCR_TOKEN || github.token }}
 
       - name: Run client+server debug e2e
