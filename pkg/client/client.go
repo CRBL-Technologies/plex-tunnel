@@ -14,7 +14,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/antoinecorbel7/plex-tunnel/pkg/tunnel"
+	"github.com/CRBL-Technologies/plex-tunnel-proto/tunnel"
 )
 
 type Client struct {

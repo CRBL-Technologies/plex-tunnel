@@ -836,7 +836,7 @@ make test                    # go test -race ./...
 
 Both repos contain independent copies of `pkg/tunnel/`. This creates a coordination problem during protocol upgrades (the chicken-and-egg CI issue). The solution:
 
-1. Extract `pkg/tunnel/` into `github.com/antoinecorbel7/plex-tunnel-proto`
+1. Extract `pkg/tunnel/` into `github.com/CRBL-Technologies/plex-tunnel-proto`
 2. Both repos import it as a Go module dependency
 3. Protocol changes are versioned in one place
 4. Each repo tests against the shared module independently

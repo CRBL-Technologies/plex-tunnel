@@ -31,7 +31,7 @@ The root cause is straightforward: this branch changed the wire protocol from JS
 
 The better long-term path is:
 
-1. **Extract `pkg/tunnel` into a shared Go module** (e.g., `github.com/antoinecorbel7/plex-tunnel-proto`). Both client and server import it. Protocol changes are versioned in one place, and both repos update their dependency explicitly. This eliminates the chicken-and-egg problem.
+1. **Extract `pkg/tunnel` into a shared Go module** (e.g., `github.com/CRBL-Technologies/plex-tunnel-proto`). Both client and server import it. Protocol changes are versioned in one place, and both repos update their dependency explicitly. This eliminates the chicken-and-egg problem.
 
 2. **Unit/integration tests in each repo against the shared module.** The client tests that it can encode/decode frames correctly (already done in `frame_test.go`, `websocket_test.go`). The server does the same. No need to run the other side.
 

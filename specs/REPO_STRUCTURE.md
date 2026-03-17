@@ -78,7 +78,7 @@ The shared protocol module (`plex-tunnel-proto`) is the keystone. It is small, s
 
 ```
 plex-tunnel-proto/
-├── go.mod                  # module github.com/antoinecorbel7/plex-tunnel-proto
+├── go.mod                  # module github.com/CRBL-Technologies/plex-tunnel-proto
 ├── message.go              # MessageType, Message, ProtocolVersion, Validate(), ValidateForSend()
 ├── message_test.go
 ├── frame.go                # Frame, NewFrame, MarshalBinary, UnmarshalFrame, encode/decode helpers
@@ -91,7 +91,7 @@ plex-tunnel-proto/
 └── README.md
 ```
 
-- **Module path:** `github.com/antoinecorbel7/plex-tunnel-proto`
+- **Module path:** `github.com/CRBL-Technologies/plex-tunnel-proto`
 - **Versioning:** Semantic versioning (`v1.0.0`, `v1.1.0`, `v2.0.0`). Breaking protocol changes = major version bump.
 - **Dependencies:** Only `nhooyr.io/websocket` and stdlib. No application-level dependencies.
 - **Release process:** Tag a version → both client and server update their `go.mod` to the new version.
@@ -100,7 +100,7 @@ plex-tunnel-proto/
 
 ```
 plex-tunnel/
-├── go.mod                  # requires github.com/antoinecorbel7/plex-tunnel-proto v1.x.x
+├── go.mod                  # requires github.com/CRBL-Technologies/plex-tunnel-proto v1.x.x
 ├── cmd/client/
 │   ├── main.go
 │   └── ui.go
@@ -128,7 +128,7 @@ plex-tunnel/
 
 ```
 plex-tunnel-server/
-├── go.mod                  # requires github.com/antoinecorbel7/plex-tunnel-proto v1.x.x
+├── go.mod                  # requires github.com/CRBL-Technologies/plex-tunnel-proto v1.x.x
 ├── cmd/server/
 │   └── main.go
 ├── pkg/server/
@@ -260,7 +260,7 @@ workspace-setup:
 		echo "Created ../go.work"; \
 	fi
 	@if [ ! -d ../plex-tunnel-proto ]; then \
-		git clone git@github.com:antoinecorbel7/plex-tunnel-proto.git ../plex-tunnel-proto; \
+		git clone git@github.com:CRBL-Technologies/plex-tunnel-proto.git ../plex-tunnel-proto; \
 	fi
 ```
 
@@ -395,7 +395,7 @@ jobs:
 
 No Docker build. No deployment. Proto is a library — it's consumed via `go get`, not as a binary or image.
 
-**Release process:** Tag a version on main → `go get github.com/antoinecorbel7/plex-tunnel-proto@v1.x.x` becomes available.
+**Release process:** Tag a version on main → `go get github.com/CRBL-Technologies/plex-tunnel-proto@v1.x.x` becomes available.
 
 ### 6.2 Client CI (`plex-tunnel`)
 
@@ -581,8 +581,8 @@ package server_test
 
 **Effort:** Small. **Risk:** Low. **Dependency:** None.
 
-1. Create `github.com/antoinecorbel7/plex-tunnel-proto` repository
-2. Initialize `go.mod` with module path `github.com/antoinecorbel7/plex-tunnel-proto`
+1. Create `github.com/CRBL-Technologies/plex-tunnel-proto` repository
+2. Initialize `go.mod` with module path `github.com/CRBL-Technologies/plex-tunnel-proto`
 3. Copy from current client `pkg/tunnel/`:
    - `message.go` → `message.go`
    - `message_test.go` → `message_test.go` (tunnel_test.go validation tests)
@@ -595,19 +595,19 @@ package server_test
 4. Update package declaration from `package tunnel` to `package proto` (or keep as `tunnel` — choose one name)
 5. Add CI workflow (test + vet)
 6. Tag `v1.0.0`
-7. Verify: `go get github.com/antoinecorbel7/plex-tunnel-proto@v1.0.0` works
+7. Verify: `go get github.com/CRBL-Technologies/plex-tunnel-proto@v1.0.0` works
 
 **Decision: package name.** Recommend keeping `package tunnel` so import paths read naturally:
 
 ```go
-import "github.com/antoinecorbel7/plex-tunnel-proto/tunnel"
+import "github.com/CRBL-Technologies/plex-tunnel-proto/tunnel"
 // Usage: tunnel.Message, tunnel.DialWebSocket, etc.
 ```
 
 Or use a flat module with `package proto`:
 
 ```go
-import proto "github.com/antoinecorbel7/plex-tunnel-proto"
+import proto "github.com/CRBL-Technologies/plex-tunnel-proto"
 // Usage: proto.Message, proto.DialWebSocket, etc.
 ```
 
@@ -617,7 +617,7 @@ Either works. The flat module is simpler (no subdirectory). Keep `package tunnel
 
 **Effort:** Medium. **Risk:** Medium (must not break existing behavior). **Dependency:** Step 1.
 
-1. In `plex-tunnel/go.mod`: `go get github.com/antoinecorbel7/plex-tunnel-proto@v1.0.0`
+1. In `plex-tunnel/go.mod`: `go get github.com/CRBL-Technologies/plex-tunnel-proto@v1.0.0`
 2. Update all imports in `pkg/client/` from `github.com/antoinecorbel7/plex-tunnel/pkg/tunnel` to the proto module path
 3. Delete `pkg/tunnel/` entirely from the client repo
 4. Run `go test ./...` — fix any compilation errors (likely just import paths)
