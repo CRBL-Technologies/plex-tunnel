@@ -25,12 +25,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Vet
+        run: go vet ./...
+
       - name: Run tests
-        run: go test ./...
+        run: go test -race ./...
 
   e2e-connectivity:
     name: E2E Connectivity
     runs-on: ubuntu-latest
+    # Manual trigger only — requires a compatible server image.
+    # Not a merge gate: the server image speaks a different protocol version
+    # until the server repo is updated. Run locally with docker-compose.debug.yml.
+    if: github.event_name == 'workflow_dispatch'
     needs: test
     timeout-minutes: 20
     env:
@@ -53,7 +60,7 @@ jobs:
   docker:
     name: Build And Push Docker Image
     runs-on: ubuntu-latest
-    needs: [test, e2e-connectivity]
+    needs: [test]
     if: github.event_name == 'push'
     steps:
       - name: Checkout
