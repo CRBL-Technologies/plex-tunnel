@@ -14,16 +14,25 @@ func TestMessageValidate(t *testing.T) {
 		{
 			name: "register ok",
 			msg: Message{
-				Type:  MsgRegister,
-				Token: "abc",
+				Type:            MsgRegister,
+				Token:           "abc",
+				ProtocolVersion: ProtocolVersion,
 			},
 		},
 		{
 			name: "register missing token",
 			msg: Message{
-				Type: MsgRegister,
+				Type:            MsgRegister,
+				ProtocolVersion: ProtocolVersion,
 			},
 			wantErr: true,
+		},
+		{
+			name: "register missing protocol version allowed for decode compatibility",
+			msg: Message{
+				Type:  MsgRegister,
+				Token: "abc",
+			},
 		},
 		{
 			name: "http request ok",
@@ -46,6 +55,51 @@ func TestMessageValidate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.msg.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected nil error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestMessageValidateForSend(t *testing.T) {
+	tests := []struct {
+		name    string
+		msg     Message
+		wantErr bool
+	}{
+		{
+			name: "register includes protocol version",
+			msg: Message{
+				Type:            MsgRegister,
+				Token:           "abc",
+				ProtocolVersion: ProtocolVersion,
+			},
+		},
+		{
+			name: "register missing protocol version",
+			msg: Message{
+				Type:  MsgRegister,
+				Token: "abc",
+			},
+			wantErr: true,
+		},
+		{
+			name: "register ack missing protocol version",
+			msg: Message{
+				Type:      MsgRegisterAck,
+				Subdomain: "myplex",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.msg.ValidateForSend()
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected error, got nil")
 			}
