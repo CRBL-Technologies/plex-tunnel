@@ -42,19 +42,27 @@ type Message struct {
 }
 
 func (m Message) Validate() error {
+	return m.validate(false)
+}
+
+func (m Message) ValidateForSend() error {
+	return m.validate(true)
+}
+
+func (m Message) validate(requireProtocolVersion bool) error {
 	switch m.Type {
 	case MsgRegister:
 		if m.Token == "" {
 			return errors.New("register message missing token")
 		}
-		if m.ProtocolVersion == 0 {
+		if requireProtocolVersion && m.ProtocolVersion == 0 {
 			return errors.New("register message missing protocol_version")
 		}
 	case MsgRegisterAck:
 		if m.Subdomain == "" {
 			return errors.New("register ack missing subdomain")
 		}
-		if m.ProtocolVersion == 0 {
+		if requireProtocolVersion && m.ProtocolVersion == 0 {
 			return errors.New("register ack missing protocol_version")
 		}
 	case MsgHTTPRequest:

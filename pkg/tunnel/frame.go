@@ -8,6 +8,8 @@ import (
 
 const frameHeaderSize = 9
 
+// Frame lengths are encoded as uint32 in the header, so payload sections must
+// remain within that representable range.
 const maxFrameSectionLength = uint64(^uint32(0))
 
 type Frame struct {
@@ -83,7 +85,7 @@ func UnmarshalFrame(payload []byte) (Frame, error) {
 }
 
 func encodeMessagePayload(msg Message) ([]byte, error) {
-	if err := msg.Validate(); err != nil {
+	if err := msg.ValidateForSend(); err != nil {
 		return nil, fmt.Errorf("validate message: %w", err)
 	}
 

@@ -47,6 +47,8 @@ The new protocol uses WebSocket **binary** messages. Each message is a single bi
 | 10    | `WSClose`        | either           |
 | 11    | `KeyExchange`    | reserved         |
 
+`WSOpen`, `WSFrame`, `WSClose`, and `KeyExchange` are protocol-reserved/stubbed message types in this phase. They are defined for forward compatibility but are not yet fully functional end-to-end.
+
 ### Metadata (JSON header)
 
 The metadata section is a JSON object containing all message fields **except** the body. Fields use `omitempty` — only non-zero fields are present.
