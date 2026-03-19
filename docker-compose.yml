@@ -2,16 +2,22 @@ services:
   plex:
     image: plexinc/pms-docker:latest
     container_name: plex
+    restart: unless-stopped
     network_mode: host
+    environment:
+      - PLEX_CLAIM=claim-xxxxxxxxxxxxxxxxxxxx
+    volumes:
+      - /opt/plex/config:/config
+      - /mnt/media:/data
 
   plextunnel-client:
     image: ${PLEXTUNNEL_CLIENT_IMAGE:-ghcr.io/crbl-technologies/plex-tunnel:latest}
     container_name: plextunnel-client
-    environment:
-      - PLEXTUNNEL_TOKEN=${PLEXTUNNEL_TOKEN}
-      - PLEXTUNNEL_SERVER_URL=${PLEXTUNNEL_SERVER_URL}
-      - PLEXTUNNEL_PLEX_TARGET=${PLEXTUNNEL_PLEX_TARGET:-http://127.0.0.1:32400}
-      - PLEXTUNNEL_SUBDOMAIN=${PLEXTUNNEL_SUBDOMAIN:-}
-      - PLEXTUNNEL_UI_LISTEN=${PLEXTUNNEL_UI_LISTEN:-127.0.0.1:9090}
     restart: unless-stopped
     network_mode: host
+    environment:
+      - PLEXTUNNEL_TOKEN=your-token-here
+      - PLEXTUNNEL_SERVER_URL=wss://tunnel.example.com
+      - PLEXTUNNEL_PLEX_TARGET=http://127.0.0.1:32400
+      # - PLEXTUNNEL_SUBDOMAIN=my-subdomain
+      # - PLEXTUNNEL_UI_LISTEN=127.0.0.1:9090

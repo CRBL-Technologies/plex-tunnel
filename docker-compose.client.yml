@@ -1,0 +1,31 @@
+# ── Your Plex Media Server ────────────────────────────────────────────────────
+# If you are already running Plex separately, skip this block.
+# Otherwise add your Plex service here and PlexTunnel will connect to it.
+# Example:
+#
+# services:
+#   plex:
+#     image: plexinc/pms-docker:latest
+#     container_name: plex
+#     restart: unless-stopped
+#     network_mode: host
+#     environment:
+#       - PLEX_CLAIM=claim-xxxxxxxxxxxxxxxxxxxx
+#     volumes:
+#       - /opt/plex/config:/config
+#       - /mnt/media:/data
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  plextunnel-client:
+    image: ghcr.io/crbl-technologies/plex-tunnel:latest
+    container_name: plextunnel-client
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PLEXTUNNEL_TOKEN=your-token-here
+      - PLEXTUNNEL_SERVER_URL=wss://tunnel.example.com
+      - PLEXTUNNEL_PLEX_TARGET=http://127.0.0.1:32400
+      # - PLEXTUNNEL_SUBDOMAIN=my-subdomain
+      # - PLEXTUNNEL_UI_LISTEN=127.0.0.1:9090
