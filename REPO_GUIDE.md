@@ -30,4 +30,4 @@ For local multi-repo work, run:
 make workspace-setup
 ```
 
-That creates a parent-level `go.work` linking `plex-tunnel`, `plex-tunnel-server`, and `plex-tunnel-proto`.
+That creates a parent-level `go.work` linking `plex-tunnel` and `plex-tunnel-proto`, and it also includes `plex-tunnel-server` when that sibling checkout is present.

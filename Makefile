@@ -35,7 +35,11 @@ debug-test: ## Run e2e test (auto-clones/pulls server source unless PLEXTUNNEL_S
 
 workspace-setup:
 	@if [ ! -f ../go.work ]; then \
-		printf 'go 1.22\n\nuse (\n\t./plex-tunnel-proto\n\t./plex-tunnel\n\t./plex-tunnel-server\n)\n' > ../go.work; \
+		printf 'go 1.22\n\nuse (\n\t./plex-tunnel-proto\n\t./plex-tunnel\n' > ../go.work; \
+		if [ -d ../plex-tunnel-server ]; then \
+			printf '\t./plex-tunnel-server\n' >> ../go.work; \
+		fi; \
+		printf ')\n' >> ../go.work; \
 		echo "Created ../go.work"; \
 	else \
 		echo "../go.work already exists"; \
@@ -43,4 +47,7 @@ workspace-setup:
 	@if [ ! -d ../plex-tunnel-proto ]; then \
 		echo "Missing ../plex-tunnel-proto. Clone it when ready:"; \
 		echo "  git clone git@github.com:CRBL-Technologies/plex-tunnel-proto.git ../plex-tunnel-proto"; \
+	fi
+	@if [ ! -d ../plex-tunnel-server ]; then \
+		echo "Optional: clone ../plex-tunnel-server for cross-repo client/server changes."; \
 	fi

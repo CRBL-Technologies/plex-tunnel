@@ -39,7 +39,7 @@ make docker-client
 `docker-compose.yml` pulls `ghcr.io/crbl-technologies/plex-tunnel:latest` by default.
 
 ```bash
-docker login ghcr.io -u antoinecorbel7
+docker login ghcr.io -u CRBL-Technologies
 docker compose --env-file .env pull
 docker compose --env-file .env up -d plextunnel-client
 ```
@@ -96,8 +96,8 @@ Expected layout:
 ```text
 ../go.work
 ../plex-tunnel
-../plex-tunnel-server
 ../plex-tunnel-proto
+../plex-tunnel-server   # optional, only if you are changing server + client together
 ```
 
 `go.work` stays local-only and is not committed.
