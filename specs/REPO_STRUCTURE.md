@@ -20,15 +20,14 @@
 
 ### Current state
 
-Two repositories with duplicated protocol code and a fragile cross-repo CI dependency:
+Transition state: the client has migrated to the shared proto module, but the server still carries duplicated protocol code and the cross-repo integration risk remains:
 
 ```
 plex-tunnel (client)          plex-tunnel-server
-├── pkg/tunnel/               ├── pkg/tunnel/         ← duplicated
-│   ├── message.go            │   ├── message.go
-│   ├── frame.go              │   ├── frame.go
-│   ├── websocket.go          │   ├── websocket.go
-│   └── transport.go          │   └── transport.go
+├── go.mod → depends on       ├── pkg/tunnel/         ← still local to server
+│   github.com/CRBL-          │   ├── frame.go
+│   Technologies/plex-        │   ├── websocket.go
+│   tunnel-proto              │   └── transport.go
 ├── pkg/client/               ├── pkg/server/
 └── .github/workflows/        └── .github/workflows/
      └── e2e pulls server          └── (independent)
@@ -37,8 +36,8 @@ plex-tunnel (client)          plex-tunnel-server
 
 ### Problems
 
-1. **Protocol drift.** Two independent copies of `pkg/tunnel/` must be kept in sync manually. A change in one repo without the other creates incompatible builds.
-2. **Chicken-and-egg CI.** The client's e2e job pulls `server:latest` from GHCR. Protocol changes break e2e until both repos are updated, but CI gates merges on e2e passing — deadlock.
+1. **Protocol drift still exists on the server side.** The shared module reduces drift for the client, but the server can still diverge until it migrates too.
+2. **Chicken-and-egg CI is reduced but not eliminated.** The client's e2e job still depends on a server image that must be updated in lockstep with the shared proto version.
 3. **No contract testing.** Nothing validates that the client and server agree on the wire format without running a full docker-compose stack.
 4. **No staging environment.** Changes go directly from local dev to production. No pre-production validation step.
 5. **Slow feedback loop.** The e2e job clones a repo, builds Docker images, spins up compose, and polls for 45 seconds. This is slow and flaky for a merge gate.
@@ -615,7 +614,7 @@ Either works. The flat module is simpler (no subdirectory). Keep `package tunnel
 
 ### Step 2: Migrate client to use proto
 
-**Effort:** Medium. **Risk:** Medium (must not break existing behavior). **Dependency:** Step 1.
+**Status:** Completed in this repository.
 
 1. In `plex-tunnel/go.mod`: `go get github.com/CRBL-Technologies/plex-tunnel-proto@v1.0.0`
 2. Update all imports in `pkg/client/` from `github.com/antoinecorbel7/plex-tunnel/pkg/tunnel` to the proto module path
@@ -627,7 +626,7 @@ Either works. The flat module is simpler (no subdirectory). Keep `package tunnel
 
 ### Step 3: Migrate server to use proto
 
-**Effort:** Medium. **Risk:** Medium. **Dependency:** Step 1.
+**Effort:** Medium. **Risk:** Medium. **Dependency:** Step 1. **Current highest-priority follow-up.**
 
 Same process as step 2, but for `plex-tunnel-server`. Update imports, delete `pkg/tunnel/`, verify tests pass.
 
