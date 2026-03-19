@@ -6,16 +6,16 @@ PlexTunnel Client runs next to your Plex server and opens an outbound encrypted 
 
 ### Option A — Docker Compose (recommended)
 
-Download the compose file and edit the two required values:
+Download the compose file:
 
 ```bash
 curl -O https://raw.githubusercontent.com/CRBL-Technologies/plex-tunnel/main/docker-compose.client.yml
 ```
 
-Open `docker-compose.client.yml` and set:
+Open `docker-compose.client.yml` and replace the two placeholder values:
 
-- `PLEXTUNNEL_TOKEN` — your token from the PlexTunnel dashboard
-- `PLEXTUNNEL_SERVER_URL` — the WebSocket URL of the PlexTunnel server (e.g. `wss://tunnel.example.com`)
+- `your-token-here` → your token from the PlexTunnel dashboard
+- `wss://tunnel.example.com` → the WebSocket URL of your PlexTunnel server
 
 Then start the client:
 
@@ -23,13 +23,15 @@ Then start the client:
 docker compose -f docker-compose.client.yml up -d
 ```
 
+All values in the compose file use `${VAR:-placeholder}` syntax — you can edit the placeholders directly in the file, or override any value by exporting the corresponding environment variable before running `docker compose`.
+
 **Already running Plex in Docker?** The compose file has a commented-out Plex block at the top — paste your existing Plex service there to manage both containers together.
 
-**Starting from scratch with Plex?** Use `docker-compose.yml` instead, which includes a full Plex + PlexTunnel stack:
+**Starting from scratch with Plex?** Use `docker-compose.yml` instead, which includes a full Plex + PlexTunnel stack. Replace the placeholder values for `PLEX_CLAIM`, `PLEXTUNNEL_TOKEN`, `PLEXTUNNEL_SERVER_URL`, and the volume paths:
 
 ```bash
 curl -O https://raw.githubusercontent.com/CRBL-Technologies/plex-tunnel/main/docker-compose.yml
-# edit PLEX_CLAIM, PLEXTUNNEL_TOKEN, PLEXTUNNEL_SERVER_URL, and volume paths
+# edit placeholder values in the file
 docker compose up -d
 ```
 
