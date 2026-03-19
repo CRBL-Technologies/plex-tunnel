@@ -11,7 +11,7 @@
 
 ### Why e2e CI keeps failing
 
-The root cause is straightforward: this branch changed the wire protocol from JSON text frames to binary framing v1 (`pkg/tunnel/websocket.go` now writes `websocket.MessageBinary` via `encodeMessagePayload`), but the e2e job pulls `ghcr.io/antoinecorbel7/plex-tunnel-server:latest` — a server image that still speaks the old JSON protocol. The handshake completes (JSON registration messages are still parseable), but the first `MsgHTTPResponse` from the server arrives as a JSON text frame while the client expects a binary frame, so `Receive()` fails with `"expected binary frame"`. This is not a CI misconfiguration — it's a fundamental protocol incompatibility between the two sides.
+The root cause is straightforward: this branch changed the wire protocol from JSON text frames to binary framing v1 (`pkg/tunnel/websocket.go` now writes `websocket.MessageBinary` via `encodeMessagePayload`), but the e2e job pulls `ghcr.io/crbl-technologies/plex-tunnel-server:latest` — a server image that still speaks the old JSON protocol. The handshake completes (JSON registration messages are still parseable), but the first `MsgHTTPResponse` from the server arrives as a JSON text frame while the client expects a binary frame, so `Receive()` fails with `"expected binary frame"`. This is not a CI misconfiguration — it's a fundamental protocol incompatibility between the two sides.
 
 ### Assessment: "Was it a good idea to build a server in CI to test the client?"
 

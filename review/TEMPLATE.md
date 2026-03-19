@@ -45,10 +45,10 @@ Description and suggested fix.
 ## Test Results
 
 ```
-ok  github.com/antoinecorbel7/plex-tunnel-server/pkg/auth    Xs
-ok  github.com/antoinecorbel7/plex-tunnel-server/pkg/admin   Xs
-ok  github.com/antoinecorbel7/plex-tunnel-server/pkg/server  Xs
-ok  github.com/antoinecorbel7/plex-tunnel-server/pkg/tunnel  Xs
+ok  github.com/CRBL-Technologies/plex-tunnel-server/pkg/auth    Xs
+ok  github.com/CRBL-Technologies/plex-tunnel-server/pkg/admin   Xs
+ok  github.com/CRBL-Technologies/plex-tunnel-server/pkg/server  Xs
+ok  github.com/CRBL-Technologies/plex-tunnel-server/pkg/tunnel  Xs
 ```
 
 <!-- Note any failures, skipped packages, or race detector findings. -->
