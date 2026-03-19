@@ -4,7 +4,7 @@
 **PR:** #2 — Migrate client to shared proto module
 **Compared to:** `main`
 **Reviewer:** Claude
-**Last updated:** 2026-03-19 (round 1)
+**Last updated:** 2026-03-19 (round 2)
 
 ---
 
@@ -107,10 +107,34 @@ Tests were not run locally against this branch. The CI `test` job (`go test -rac
 - [x] e2e job demoted to manual trigger
 - [x] `workspace-setup` Makefile target added
 - [x] Org/registry references updated throughout docs and scripts
-- [ ] `workspace-setup` `go.work` template does not reference absent sibling repos unconditionally
+- [x] `workspace-setup` `go.work` template does not reference absent sibling repos unconditionally
 
 ---
 
 ## Verdict
 
 **Approved.** The core migration is executed cleanly and correctly. The import swap, `go.mod`/`go.sum` pin, and CI changes are all right. Issue 1 (the `workspace-setup` footgun) is the only item worth fixing before merge if developers will regularly use `make workspace-setup` — it is a one-line fix. Everything else is minor or pre-existing.
+
+---
+
+## Round 2 — Follow-up changes (commit `22bd60b`)
+
+### What Was Addressed
+
+All five issues from round 1 were resolved:
+
+| Issue | Status |
+|-------|--------|
+| 1 — `workspace-setup` unconditionally referenced absent `plex-tunnel-server` | ✅ Fixed — server path now guarded by `[ -d ../plex-tunnel-server ]`; hint added when absent |
+| 2 — Outbound send validation silently removed (proto-level concern) | ✅ Acknowledged — noted as proto follow-up, no client-side action needed |
+| 3 — `reviews/TEMPLATE.md` showed server package paths | ✅ Fixed — replaced with correct client package paths |
+| 4 — `README.md` `docker login` still used `antoinecorbel7` | ✅ Fixed — updated to `CRBL-Technologies` |
+| 5 — `go.mod` module name inconsistency undocumented | ✅ Fixed — comment added explaining the intentional deferral of the breaking rename |
+
+### Notes on the Fixes
+
+The `workspace-setup` fix is correct and well-structured: the `go.work` body is assembled in parts, the server block is conditionally appended, and the closing `)\n` is written last. `REPO_GUIDE.md` is updated to match the new conditional behavior. The `README.md` workspace layout diagram also correctly marks `plex-tunnel-server` as optional.
+
+### Round 2 Verdict
+
+**Approved — ready to merge.** All round 1 findings resolved with no new concerns introduced.
