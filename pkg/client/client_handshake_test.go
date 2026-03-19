@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog"
 	"nhooyr.io/websocket"
 
-	"github.com/antoinecorbel7/plex-tunnel/pkg/tunnel"
+	"github.com/CRBL-Technologies/plex-tunnel-proto/tunnel"
 )
 
 func TestRunSessionHandshakeSendsProtocolVersion(t *testing.T) {

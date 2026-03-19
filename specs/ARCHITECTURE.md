@@ -155,7 +155,7 @@ plex-tunnel-server/
 └── README.md
 ```
 
-> **Note:** Both repositories currently contain independent copies of `pkg/tunnel/`. This is the shared protocol layer and should eventually be extracted into a shared Go module (see [Section 10](#10-future-work)).
+> **Note:** The client now imports the shared protocol module `github.com/CRBL-Technologies/plex-tunnel-proto/tunnel`. The server still needs to complete the same migration (see [Section 10](#10-future-work)).
 
 ---
 
@@ -630,7 +630,7 @@ services:
     network_mode: host
 
   plextunnel-client:
-    image: ghcr.io/antoinecorbel7/plex-tunnel:latest
+    image: ghcr.io/crbl-technologies/plex-tunnel:latest
     network_mode: host
     restart: unless-stopped
     environment:
@@ -659,7 +659,7 @@ Cross-compile targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm
 
 #### Client Docker Image
 
-- Registry: `ghcr.io/antoinecorbel7/plex-tunnel`
+- Registry: `ghcr.io/crbl-technologies/plex-tunnel`
 - Tags: `latest`, `sha-<commit>`
 - Base: `alpine:3.19` with `ca-certificates`
 - Binary: `/usr/local/bin/plextunnel-client`
@@ -698,7 +698,7 @@ Requires:
 
 #### Server Docker Image
 
-- Registry: `ghcr.io/antoinecorbel7/plex-tunnel-server`
+- Registry: `ghcr.io/crbl-technologies/plex-tunnel-server`
 - Tags: `latest`, `sha-<commit>`
 - Base: `alpine:3.19` with `ca-certificates`
 - Binary: `/usr/local/bin/plextunnel-server`
@@ -758,7 +758,7 @@ make debug-down     # Tear down
 
 **Server image sources (in priority order):**
 1. `PLEXTUNNEL_SERVER_IMAGE` env var (pre-built image from GHCR)
-2. Auto-clone from `github.com/antoinecorbel7/plex-tunnel-server` and build locally
+2. Auto-clone from `github.com/CRBL-Technologies/plex-tunnel-server` and build locally
 3. Existing local checkout at `PLEXTUNNEL_SERVER_CONTEXT`
 
 ### 8.2 Unit Test Coverage
@@ -785,9 +785,11 @@ make debug-down     # Tear down
 ```bash
 # Client repo
 make test                    # go test -race ./...
-go test ./pkg/tunnel/...     # Protocol tests only
 go test ./pkg/client/...     # Client logic only
-go test -bench=. ./pkg/tunnel/...  # Benchmarks
+
+# Shared proto repo
+go test ./...                # Contract tests and transport tests
+go test -bench=. ./...       # Protocol benchmarks
 
 # Server repo
 make test                    # go test -race ./...
@@ -830,16 +832,16 @@ make test                    # go test -race ./...
 
 ## 10. Future Work
 
-### 10.1 Shared Protocol Module
+### 10.1 Shared Protocol Module Rollout
 
 **Priority: High.**
 
-Both repos contain independent copies of `pkg/tunnel/`. This creates a coordination problem during protocol upgrades (the chicken-and-egg CI issue). The solution:
+The client has already migrated to `github.com/CRBL-Technologies/plex-tunnel-proto`, but the server still carries its local `pkg/tunnel/` copy. That partial rollout still leaves protocol coordination risk during upgrades. The remaining work is:
 
-1. Extract `pkg/tunnel/` into `github.com/antoinecorbel7/plex-tunnel-proto`
-2. Both repos import it as a Go module dependency
-3. Protocol changes are versioned in one place
-4. Each repo tests against the shared module independently
+1. Migrate `plex-tunnel-server` to import `github.com/CRBL-Technologies/plex-tunnel-proto`
+2. Delete the server-local `pkg/tunnel/` copy after parity is confirmed
+3. Keep protocol changes versioned in the shared module only
+4. Run protocol tests and benchmarks in the proto repo, with client/server testing only their integration points
 
 ### 10.2 QUIC Transport
 

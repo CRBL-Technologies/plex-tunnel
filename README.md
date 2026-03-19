@@ -4,7 +4,7 @@ PlexTunnel Client runs next to your Plex server and opens an outbound encrypted 
 
 ## Related Repository
 
-- Server runtime: [github.com/antoinecorbel7/plex-tunnel-server](https://github.com/antoinecorbel7/plex-tunnel-server)
+- Server runtime: [github.com/CRBL-Technologies/plex-tunnel-server](https://github.com/CRBL-Technologies/plex-tunnel-server)
 
 ## Quick Start
 
@@ -36,10 +36,10 @@ Build local image (optional):
 make docker-client
 ```
 
-`docker-compose.yml` pulls `ghcr.io/antoinecorbel7/plex-tunnel:latest` by default.
+`docker-compose.yml` pulls `ghcr.io/crbl-technologies/plex-tunnel:latest` by default.
 
 ```bash
-docker login ghcr.io -u antoinecorbel7
+docker login ghcr.io -u CRBL-Technologies
 docker compose --env-file .env pull
 docker compose --env-file .env up -d plextunnel-client
 ```
@@ -47,7 +47,7 @@ docker compose --env-file .env up -d plextunnel-client
 Override image if needed:
 
 ```bash
-PLEXTUNNEL_CLIENT_IMAGE=ghcr.io/antoinecorbel7/plex-tunnel:sha-<commit> docker compose --env-file .env up -d plextunnel-client
+PLEXTUNNEL_CLIENT_IMAGE=ghcr.io/crbl-technologies/plex-tunnel:sha-<commit> docker compose --env-file .env up -d plextunnel-client
 ```
 
 ## Configuration
@@ -74,8 +74,8 @@ Applying settings from the UI restarts the client runtime immediately.
 GitHub Actions runs tests on pull requests and on pushes to `main`.
 On pushes to `main`, it builds and pushes `Dockerfile.client` to GitHub Container Registry:
 
-- `ghcr.io/antoinecorbel7/plex-tunnel:sha-<commit>`
-- `ghcr.io/antoinecorbel7/plex-tunnel:latest`
+- `ghcr.io/crbl-technologies/plex-tunnel:sha-<commit>`
+- `ghcr.io/crbl-technologies/plex-tunnel:latest`
 
 No extra Docker credentials are required in repo secrets for same-repo publishing.
 
@@ -84,6 +84,22 @@ No extra Docker credentials are required in repo secrets for same-repo publishin
 ```bash
 make test
 ```
+
+Use the shared workspace helper when you want local client and proto changes to resolve together:
+
+```bash
+make workspace-setup
+```
+
+Expected layout:
+
+```text
+../go.work
+../plex-tunnel
+../plex-tunnel-proto
+```
+
+`go.work` stays local-only and is not committed.
 
 ## Local Debug Environment
 
@@ -113,4 +129,4 @@ Notes:
   - `PLEXTUNNEL_SERVER_REF=<branch-or-tag>`
 - For private server repos over HTTPS, provide a token:
   - `PLEXTUNNEL_SERVER_REPO_TOKEN=<github_token_or_pat>`
-- Or use a prebuilt image directly: `PLEXTUNNEL_SERVER_IMAGE=ghcr.io/antoinecorbel7/plex-tunnel-server:latest make debug-test`
+- Or use a prebuilt image directly: `PLEXTUNNEL_SERVER_IMAGE=ghcr.io/crbl-technologies/plex-tunnel-server:latest make debug-test`

@@ -228,8 +228,8 @@ The client should validate messages before sending and after receiving, matching
 
 ## Reference
 
-- Server implementation: `pkg/tunnel/frame.go` — `Frame`, `NewFrame`, `MarshalBinary`, `UnmarshalFrame`
-- Server wire format: `pkg/tunnel/websocket.go` — `Send()` and `Receive()`
+- Shared proto implementation: `github.com/CRBL-Technologies/plex-tunnel-proto/tunnel/frame.go` — `Frame`, `NewFrame`, `MarshalBinary`, `UnmarshalFrame`
+- Shared proto wire format: `github.com/CRBL-Technologies/plex-tunnel-proto/tunnel/websocket.go` — `Send()` and `Receive()`
 - Server handshake: `pkg/server/server.go` — `handleTunnel()`
-- Protocol version constant: `pkg/tunnel/message.go` — `ProtocolVersion = 1`
-- Server benchmark: `pkg/tunnel/benchmark_test.go` — `BenchmarkBinaryFrameVsLegacyJSON`
+- Protocol version constant: `github.com/CRBL-Technologies/plex-tunnel-proto/tunnel/message.go` — `ProtocolVersion = 1`
+- Shared proto benchmark: `github.com/CRBL-Technologies/plex-tunnel-proto/tunnel/benchmark_test.go` — `BenchmarkBinaryFrameVsLegacyJSON`

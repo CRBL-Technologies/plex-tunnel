@@ -1,4 +1,4 @@
-.PHONY: build-client build test docker-client clean release-client debug-up debug-down debug-logs debug-test
+.PHONY: build-client build test docker-client clean release-client debug-up debug-down debug-logs debug-test workspace-setup
 
 build-client:
 	go build -o bin/plextunnel-client ./cmd/client
@@ -32,3 +32,15 @@ debug-logs:
 
 debug-test: ## Run e2e test (auto-clones/pulls server source unless PLEXTUNNEL_SERVER_IMAGE is set)
 	./scripts/e2e-debug.sh
+
+workspace-setup:
+	@if [ ! -f ../go.work ]; then \
+		printf 'go 1.22\n\nuse (\n\t./plex-tunnel-proto\n\t./plex-tunnel\n)\n' > ../go.work; \
+		echo "Created ../go.work"; \
+	else \
+		echo "../go.work already exists"; \
+	fi
+	@if [ ! -d ../plex-tunnel-proto ]; then \
+		echo "Missing ../plex-tunnel-proto. Clone it when ready:"; \
+		echo "  git clone git@github.com:CRBL-Technologies/plex-tunnel-proto.git ../plex-tunnel-proto"; \
+	fi

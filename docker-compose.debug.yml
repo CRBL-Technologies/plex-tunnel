@@ -4,7 +4,7 @@ services:
     command: ["-listen=:32400", "-text=mock-plex-ok"]
 
   server:
-    image: ${PLEXTUNNEL_SERVER_IMAGE:-ghcr.io/antoinecorbel7/plex-tunnel-server:latest}
+    image: ${PLEXTUNNEL_SERVER_IMAGE:-ghcr.io/crbl-technologies/plex-tunnel-server:latest}
     environment:
       PLEXTUNNEL_SERVER_LISTEN: :8080
       PLEXTUNNEL_SERVER_TUNNEL_LISTEN: :8081
