@@ -5,10 +5,10 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      - PLEX_CLAIM=claim-xxxxxxxxxxxxxxxxxxxx
+      - PLEX_CLAIM=${PLEX_CLAIM:-claim-xxxxxxxxxxxxxxxxxxxx}
     volumes:
-      - /opt/plex/config:/config
-      - /mnt/media:/data
+      - ${PLEX_CONFIG_DIR:-/opt/plex/config}:/config
+      - ${PLEX_MEDIA_DIR:-/mnt/media}:/data
 
   plextunnel-client:
     image: ${PLEXTUNNEL_CLIENT_IMAGE:-ghcr.io/crbl-technologies/plex-tunnel:latest}
@@ -16,8 +16,9 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      - PLEXTUNNEL_TOKEN=your-token-here
-      - PLEXTUNNEL_SERVER_URL=wss://tunnel.example.com
-      - PLEXTUNNEL_PLEX_TARGET=http://127.0.0.1:32400
-      # - PLEXTUNNEL_SUBDOMAIN=my-subdomain
-      # - PLEXTUNNEL_UI_LISTEN=127.0.0.1:9090
+      - PLEXTUNNEL_TOKEN=${PLEXTUNNEL_TOKEN:-your-token-here}
+      - PLEXTUNNEL_SERVER_URL=${PLEXTUNNEL_SERVER_URL:-wss://tunnel.example.com}
+      - PLEXTUNNEL_PLEX_TARGET=${PLEXTUNNEL_PLEX_TARGET:-http://127.0.0.1:32400}
+      - PLEXTUNNEL_SUBDOMAIN=${PLEXTUNNEL_SUBDOMAIN:-}
+      - PLEXTUNNEL_UI_LISTEN=${PLEXTUNNEL_UI_LISTEN:-127.0.0.1:9090}
+      - PLEXTUNNEL_LOG_LEVEL=${PLEXTUNNEL_LOG_LEVEL:-info}
