@@ -4,7 +4,7 @@
 **PR:** #2 — Migrate client to shared proto module
 **Compared to:** `main`
 **Reviewer:** Claude
-**Last updated:** 2026-03-19 (round 2)
+**Last updated:** 2026-03-19 (round 3)
 
 ---
 
@@ -137,4 +137,28 @@ The `workspace-setup` fix is correct and well-structured: the `go.work` body is 
 
 ### Round 2 Verdict
 
-**Approved — ready to merge.** All round 1 findings resolved with no new concerns introduced.
+**Changes Requested.** All round 1 findings resolved, but a new issue was identified in review of the fixes.
+
+---
+
+## Round 3 — Follow-up changes (commit `22bd60b` re-review)
+
+### New Issue Identified
+
+**Issue 6 — `workspace-setup` should never reference `plex-tunnel-server` at all (blocking)**
+
+> `Makefile:39-53`, `README.md:100`, `REPO_GUIDE.md:33`
+
+The round 2 fix made the server path conditional on `[ -d ../plex-tunnel-server ]`, but the premise is wrong: the client has no Go import relationship with the server — they are entirely separate services. A Go workspace resolves module paths for packages that import each other; including `plex-tunnel-server` in the client's `go.work` provides nothing, regardless of whether the checkout exists. The "optional cross-repo development" framing was incorrect.
+
+Fix: remove all references to `plex-tunnel-server` from `workspace-setup`, `README.md`, and `REPO_GUIDE.md`.
+
+### What Was Fixed
+
+- `Makefile`: server directory check and conditional `go.work` entry removed; `workspace-setup` now writes only `plex-tunnel-proto` and `plex-tunnel`
+- `README.md`: workspace layout diagram updated to remove server entry
+- `REPO_GUIDE.md`: description updated to reflect two-repo workspace only
+
+### Round 3 Verdict
+
+**Approved — ready to merge.** The workspace target now correctly reflects the client's actual dependency graph.

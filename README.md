@@ -97,7 +97,6 @@ Expected layout:
 ../go.work
 ../plex-tunnel
 ../plex-tunnel-proto
-../plex-tunnel-server   # optional, only if you are changing server + client together
 ```
 
 `go.work` stays local-only and is not committed.
