@@ -85,7 +85,7 @@ No extra Docker credentials are required in repo secrets for same-repo publishin
 make test
 ```
 
-Use the shared workspace helper when you want local client/server/proto changes to resolve together:
+Use the shared workspace helper when you want local client and proto changes to resolve together:
 
 ```bash
 make workspace-setup
