@@ -5,7 +5,7 @@ services:
     network_mode: host
 
   plextunnel-client:
-    image: ${PLEXTUNNEL_CLIENT_IMAGE:-ghcr.io/antoinecorbel7/plex-tunnel:latest}
+    image: ${PLEXTUNNEL_CLIENT_IMAGE:-ghcr.io/crbl-technologies/plex-tunnel:latest}
     container_name: plextunnel-client
     environment:
       - PLEXTUNNEL_TOKEN=${PLEXTUNNEL_TOKEN}

@@ -6,7 +6,7 @@ HOST_PORT="${HOST_PORT:-18080}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-45}"
 TEST_HOST="${TEST_HOST:-myserver.local.test}"
 SERVER_CONTEXT="${PLEXTUNNEL_SERVER_CONTEXT:-/tmp/plex-tunnel-server}"
-SERVER_REPO_URL="${PLEXTUNNEL_SERVER_REPO_URL:-git@github.com:antoinecorbel7/plex-tunnel-server.git}"
+SERVER_REPO_URL="${PLEXTUNNEL_SERVER_REPO_URL:-git@github.com:CRBL-Technologies/plex-tunnel-server.git}"
 SERVER_REF="${PLEXTUNNEL_SERVER_REF:-main}"
 SERVER_REPO_TOKEN="${PLEXTUNNEL_SERVER_REPO_TOKEN:-}"
 

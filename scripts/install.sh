@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO_URL="https://github.com/antoinecorbel7/plex-tunnel"
+REPO_URL="https://github.com/CRBL-Technologies/plex-tunnel"
 VERSION="${PLEXTUNNEL_VERSION:-latest}"
 
 if [ "$VERSION" = "latest" ]; then

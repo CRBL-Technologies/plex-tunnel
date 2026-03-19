@@ -630,7 +630,7 @@ services:
     network_mode: host
 
   plextunnel-client:
-    image: ghcr.io/antoinecorbel7/plex-tunnel:latest
+    image: ghcr.io/crbl-technologies/plex-tunnel:latest
     network_mode: host
     restart: unless-stopped
     environment:
@@ -659,7 +659,7 @@ Cross-compile targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm
 
 #### Client Docker Image
 
-- Registry: `ghcr.io/antoinecorbel7/plex-tunnel`
+- Registry: `ghcr.io/crbl-technologies/plex-tunnel`
 - Tags: `latest`, `sha-<commit>`
 - Base: `alpine:3.19` with `ca-certificates`
 - Binary: `/usr/local/bin/plextunnel-client`
@@ -698,7 +698,7 @@ Requires:
 
 #### Server Docker Image
 
-- Registry: `ghcr.io/antoinecorbel7/plex-tunnel-server`
+- Registry: `ghcr.io/crbl-technologies/plex-tunnel-server`
 - Tags: `latest`, `sha-<commit>`
 - Base: `alpine:3.19` with `ca-certificates`
 - Binary: `/usr/local/bin/plextunnel-server`
@@ -758,7 +758,7 @@ make debug-down     # Tear down
 
 **Server image sources (in priority order):**
 1. `PLEXTUNNEL_SERVER_IMAGE` env var (pre-built image from GHCR)
-2. Auto-clone from `github.com/antoinecorbel7/plex-tunnel-server` and build locally
+2. Auto-clone from `github.com/CRBL-Technologies/plex-tunnel-server` and build locally
 3. Existing local checkout at `PLEXTUNNEL_SERVER_CONTEXT`
 
 ### 8.2 Unit Test Coverage

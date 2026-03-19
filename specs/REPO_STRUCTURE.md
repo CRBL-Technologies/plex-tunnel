@@ -53,7 +53,7 @@ Three repositories with a shared protocol module, contract tests, local dev envi
 ### Three repositories
 
 ```
-github.com/antoinecorbel7/
+github.com/CRBL-Technologies/
 ├── plex-tunnel-proto      ← NEW: shared protocol module
 ├── plex-tunnel            ← client (exists, refactored)
 └── plex-tunnel-server     ← server (exists, refactored)
@@ -326,7 +326,7 @@ services:
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN}
 
   server:
-    image: ghcr.io/antoinecorbel7/plex-tunnel-server:staging
+    image: ghcr.io/crbl-technologies/plex-tunnel-server:staging
     environment:
       PLEXTUNNEL_SERVER_LISTEN: :8080
       PLEXTUNNEL_SERVER_TUNNEL_LISTEN: :8081
