@@ -85,6 +85,23 @@ No extra Docker credentials are required in repo secrets for same-repo publishin
 make test
 ```
 
+Use the shared workspace helper when you want local client/server/proto changes to resolve together:
+
+```bash
+make workspace-setup
+```
+
+Expected layout:
+
+```text
+../go.work
+../plex-tunnel
+../plex-tunnel-server
+../plex-tunnel-proto
+```
+
+`go.work` stays local-only and is not committed.
+
 ## Local Debug Environment
 
 Run a full local stack (server + client + mock Plex) to validate end-to-end behavior:
