@@ -208,4 +208,6 @@ All tests pass, race detector clean.
 
 ### Verdict
 
-**Approved.** All round 1 findings resolved. No remaining open items.
+**Approved.** All round 1 findings resolved. No remaining blocking review
+items. Follow-up still recommended: add an explicit end-to-end test covering an
+in-flight request pinned to a data connection that drops mid-stream.
