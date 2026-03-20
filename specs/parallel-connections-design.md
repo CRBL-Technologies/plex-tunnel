@@ -517,9 +517,10 @@ or **[client]**.
   - `MsgRegister` with `ProtocolVersion == 2`: require `MaxConnections >= 1`.
   - `MsgRegisterAck` with `ProtocolVersion == 2`: require `SessionID` non-empty
     and `MaxConnections >= 1`.
-  - Do **not** add v1 guards inside `Validate()`. The existing exact-version
-    check in `handleTunnel` (`register.ProtocolVersion != tunnel.ProtocolVersion`)
-    rejects non-v2 clients before `Validate()` is called on session fields.
+  - Keep `Validate()` scoped to v2 field requirements only when
+    `ProtocolVersion == 2`. Unsupported protocol versions should still pass the
+    base register/register-ack shape checks so callers can return a clear
+    protocol-mismatch error at the handshake layer.
 - [ ] Bump `ProtocolVersion` to `2`.
 - [ ] Tag and release (e.g. `v1.1.0`).
 
