@@ -260,10 +260,19 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 	}
 	defer resp.Body.Close()
 
+	requestLogger := c.logger.With().
+		Str("request_id", msg.ID).
+		Str("method", msg.Method).
+		Str("path", msg.Path).
+		Logger()
+
 	chunk := make([]byte, c.cfg.ResponseChunkSize)
 	headersSent := false
+	chunkIndex := 0
 	for {
+		readStartedAt := time.Now()
 		n, readErr := resp.Body.Read(chunk)
+		readCompletedAt := time.Now()
 		if n > 0 {
 			responseMsg := tunnel.Message{
 				Type: tunnel.MsgHTTPResponse,
@@ -275,9 +284,21 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 				responseMsg.Headers = tunnel.CloneHeaders(resp.Header)
 				headersSent = true
 			}
+			sendStartedAt := time.Now()
 			if err := conn.Send(responseMsg); err != nil {
 				return fmt.Errorf("send response chunk: %w", err)
 			}
+			if c.cfg.DebugBandwidthLog {
+				requestLogger.Debug().
+					Int("chunk_index", chunkIndex).
+					Int("bytes", n).
+					Bool("end_stream", responseMsg.EndStream).
+					Int("status", responseMsg.Status).
+					Int64("plex_read_ms", readCompletedAt.Sub(readStartedAt).Milliseconds()).
+					Int64("tunnel_write_ms", time.Since(sendStartedAt).Milliseconds()).
+					Msg("proxied response chunk timing")
+			}
+			chunkIndex++
 		}
 
 		if readErr == io.EOF {
@@ -294,8 +315,18 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 		finalMsg.Headers = tunnel.CloneHeaders(resp.Header)
 	}
 
+	finalSendStartedAt := time.Now()
 	if err := conn.Send(finalMsg); err != nil {
 		return fmt.Errorf("send final response chunk: %w", err)
+	}
+	if c.cfg.DebugBandwidthLog {
+		requestLogger.Debug().
+			Int("chunk_index", chunkIndex).
+			Int("bytes", len(finalMsg.Body)).
+			Bool("end_stream", finalMsg.EndStream).
+			Int("status", finalMsg.Status).
+			Int64("tunnel_write_ms", time.Since(finalSendStartedAt).Milliseconds()).
+			Msg("proxied response chunk timing")
 	}
 
 	return nil
