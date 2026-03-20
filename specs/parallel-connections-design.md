@@ -522,8 +522,95 @@ The pool is built on top of multiple `WebSocketConnection` instances.
    but adds reordering complexity. Worth revisiting after measuring pinning
    performance.
 
-4. **Server proto migration:** The server still has a local `pkg/tunnel/` copy
-   and has not migrated to the shared proto module. Protocol version 2 changes
-   need to land in the proto module first. The server migration
-   (ARCHITECTURE.md section 10.1) should be completed before or as part of
-   this work.
+4. ~~**Server proto migration:** The server still has a local `pkg/tunnel/` copy
+   and has not migrated to the shared proto module.~~ **Resolved.** The server
+   already imports `github.com/CRBL-Technologies/plex-tunnel-proto` and has no
+   local tunnel package. Protocol version 2 changes can land in the proto
+   module immediately.
+
+---
+
+## Implementation TODO
+
+> **Rollout decision: mixed-version migration.**
+> The server will accept both v1 and v2 registration flows until all clients
+> are updated. A v1 client connecting to a v2-capable server gets existing
+> single-connection behaviour unchanged. A v2 client connecting to a v1 server
+> will receive a version mismatch error (same as today) — so the server must
+> be updated before clients.
+>
+> Deployment order: proto → server → clients.
+
+Each item below is tagged with the repo it lives in: **[proto]**, **[server]**,
+or **[client]**.
+
+### Phase 1 — Proto (`plex-tunnel-proto`)
+
+- [ ] Add `SessionID string` and `MaxConnections int` to `Message`. Both
+      fields are `omitempty` so v1 messages are unaffected on the wire.
+- [ ] Update `Validate()` for version-aware checks:
+  - `MsgRegister` with `ProtocolVersion == 2`: require `MaxConnections >= 1`.
+  - `MsgRegisterAck` with `ProtocolVersion == 2`: require `SessionID` non-empty
+    and `MaxConnections >= 1`.
+  - v1 paths stay exactly as they are.
+- [ ] Bump `ProtocolVersion` to `2`.
+- [ ] Tag and release (e.g. `v1.1.0`).
+
+### Phase 2 — Server (`plex-tunnel-server`)
+
+- [ ] Add session store: `map[sessionID]*Session`, protected by a mutex.
+      `Session` holds `id`, `subdomain`, `token`, `maxConns`, and a slice of
+      `*WebSocketConnection`.
+- [ ] Update `handleTunnel` registration path:
+  - v1 client (`ProtocolVersion == 1`): existing single-connection path,
+    no change.
+  - v2 client, `SessionID == ""`: create a new session, assign a UUID, return
+    `RegisterAck` with `SessionID` and granted `MaxConnections` (capped by
+    token plan limit).
+  - v2 client, `SessionID != ""`: join an existing session — validate token
+    matches, check pool is not full, add connection, return `RegisterAck`.
+- [ ] Start a per-connection read loop for every connection added to a session.
+      Route `MsgHTTPResponse` messages by `request_id` to the correct waiting
+      channel regardless of which connection they arrive on.
+- [ ] Update `handleClientRequest` dispatch: when session has multiple
+      connections, pick the one with the fewest in-flight streams (least-streams
+      strategy), same as described in the Stream Assignment section above.
+- [ ] Update `go.mod` to the new proto release.
+- [ ] Keep v1 single-connection path working throughout — no breaking change to
+      existing clients.
+
+### Phase 3 — Client (`plex-tunnel`)
+
+- [ ] Add `MaxConnections int` to `Config`. Env var:
+      `PLEXTUNNEL_MAX_CONNECTIONS`, default `4`. Only takes effect when the
+      server grants a v2 ack.
+- [ ] Implement `ConnectionPool` in `pkg/client/pool.go` (see architecture
+      section above for the `poolConn` and assignment logic).
+- [ ] Update `runSession()`:
+  - Send `Register` with `ProtocolVersion: 2`, `MaxConnections: cfg.MaxConnections`.
+  - If `RegisterAck.ProtocolVersion == 2` and `RegisterAck.SessionID != ""`:
+    store session ID, dial remaining connections in parallel (staggered ~150 ms
+    apart), each sending a join `Register` with the session ID.
+  - If `RegisterAck.ProtocolVersion == 1` (server not yet updated): fall back
+    to single-connection mode silently.
+- [ ] Update `handleHTTPRequest` to accept the connection to send on as a
+      parameter; the pool assigns a connection per stream and pins it for all
+      chunks of that stream.
+- [ ] Ping/pong on the control connection (index 0) only.
+- [ ] On data connection drop: remove from pool, re-dial and re-join; streams
+      pinned to that connection fail and are retried by the HTTP client.
+- [ ] On control connection drop: promote lowest-index surviving connection to
+      control (take over ping/pong), re-dial a replacement.
+- [ ] Update `go.mod` to the new proto release.
+
+### Phase 4 — Tuning & Observability (both repos, after Phase 2+3)
+
+- [ ] **[client]** Increase default `ResponseChunkSize` to `262144` (256 KiB)
+      when the granted pool size is >= 2. Keep 64 KiB for single-connection
+      sessions to preserve current behaviour for v1 clients.
+- [ ] **[server]** Add per-connection metrics: bytes sent, active streams,
+      p99 write latency.
+- [ ] **[client]** Add pool status to the web UI: connections active,
+      per-connection throughput.
+- [ ] **[client/server]** Consider retiring `PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING`
+      once per-connection metrics replace its diagnostic value.
