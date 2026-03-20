@@ -64,12 +64,14 @@ All configuration is passed as environment variables:
 | `PLEXTUNNEL_PLEX_TARGET` | no | `http://127.0.0.1:32400` | Address of your local Plex instance |
 | `PLEXTUNNEL_SUBDOMAIN` | no | server-assigned | Fixed subdomain to request |
 | `PLEXTUNNEL_LOG_LEVEL` | no | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
+| `PLEXTUNNEL_MAX_CONNECTIONS` | no | `4` | Requested protocol v2 websocket pool size; the server may grant a lower value |
 | `PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING` | no | `false` | Emit per-chunk timing logs for Plex reads and tunnel sends, including lock wait, frame encoding, and websocket write time; set `PLEXTUNNEL_LOG_LEVEL=debug` to see them |
+| `PLEXTUNNEL_RESPONSE_CHUNK_SIZE` | no | `65536` | Response chunk size in bytes for proxied Plex responses |
 | `PLEXTUNNEL_UI_LISTEN` | no | `127.0.0.1:9090` | Local status UI address; set empty to disable |
 
 ## Status UI
 
-The client exposes a local status page at `http://127.0.0.1:9090/` showing connection state, assigned subdomain, and recent errors. Settings can be changed from the UI without restarting the container.
+The client exposes a local status page at `http://127.0.0.1:9090/` showing connection state, session ID, pool size, active websocket count, and recent errors. Settings can be changed from the UI without restarting the container.
 
 ## CI/CD
 
