@@ -45,10 +45,10 @@ Description and suggested fix.
 ## Test Results
 
 ```
-ok  github.com/antoinecorbel7/plex-tunnel/cmd/client          Xs
-ok  github.com/antoinecorbel7/plex-tunnel/pkg/client          Xs
-ok  github.com/antoinecorbel7/plex-tunnel/pkg/config          Xs
-ok  github.com/antoinecorbel7/plex-tunnel/test/integration    Xs
+ok  github.com/CRBL-Technologies/plex-tunnel/cmd/client          Xs
+ok  github.com/CRBL-Technologies/plex-tunnel/pkg/client          Xs
+ok  github.com/CRBL-Technologies/plex-tunnel/pkg/config          Xs
+ok  github.com/CRBL-Technologies/plex-tunnel/test/integration    Xs
 ```
 
 <!-- Note any failures, skipped packages, or race detector findings. -->

@@ -1,6 +1,5 @@
-module github.com/antoinecorbel7/plex-tunnel
+module github.com/CRBL-Technologies/plex-tunnel
 
-// Module path intentionally remains unchanged until a coordinated breaking rename across importers.
 
 go 1.22
 

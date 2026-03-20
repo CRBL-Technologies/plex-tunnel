@@ -617,7 +617,7 @@ Either works. The flat module is simpler (no subdirectory). Keep `package tunnel
 **Status:** Completed in this repository.
 
 1. In `plex-tunnel/go.mod`: `go get github.com/CRBL-Technologies/plex-tunnel-proto@v1.0.0`
-2. Update all imports in `pkg/client/` from `github.com/antoinecorbel7/plex-tunnel/pkg/tunnel` to the proto module path
+2. Update all imports in `pkg/client/` from `github.com/CRBL-Technologies/plex-tunnel/pkg/tunnel` to the proto module path
 3. Delete `pkg/tunnel/` entirely from the client repo
 4. Run `go test ./...` — fix any compilation errors (likely just import paths)
 5. Run `go test -race ./...` — ensure all tests pass
