@@ -2,6 +2,12 @@ github.com/CRBL-Technologies/plex-tunnel-proto v1.0.0 h1:qjHQYHq7urDeY6OZCLi7FBS
 github.com/CRBL-Technologies/plex-tunnel-proto v1.0.0/go.mod h1:t5Iy7y6eHvaMwd5UG9W4g8L711KPdQBpNVzN8j1TtJM=
 github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320143406-470a8caab5a9 h1:l+1/dMYJUVksPxrHLWPSZeNGBNzIPy1wCqTJmRqmg8o=
 github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320143406-470a8caab5a9/go.mod h1:t5Iy7y6eHvaMwd5UG9W4g8L711KPdQBpNVzN8j1TtJM=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320164421-fed55a008e44 h1:K1viBv4o5d35EuTC9HFBE5pk3JYm5yHo28+jsL0APTY=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320164421-fed55a008e44/go.mod h1:t5Iy7y6eHvaMwd5UG9W4g8L711KPdQBpNVzN8j1TtJM=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320171629-b707af125a4d h1:+DYhX45OOrEm6W1ziAc2Jx06wUkaJg8aPF3d6R92XFo=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320171629-b707af125a4d/go.mod h1:t5Iy7y6eHvaMwd5UG9W4g8L711KPdQBpNVzN8j1TtJM=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.1.0 h1:P66wohhXTalXOLjAZ9Z9Y6r3HLWGY7wEv8V8/78ihes=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.1.0/go.mod h1:t5Iy7y6eHvaMwd5UG9W4g8L711KPdQBpNVzN8j1TtJM=
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
 github.com/godbus/dbus/v5 v5.0.4/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5xrFpKfA=
 github.com/mattn/go-colorable v0.1.13 h1:fFA4WZxdEF4tXPZVKMLwD8oUnCTTo08duU7wxecdEvA=

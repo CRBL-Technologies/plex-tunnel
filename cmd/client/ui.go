@@ -6,13 +6,14 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
 
-	"github.com/antoinecorbel7/plex-tunnel/pkg/client"
+	"github.com/CRBL-Technologies/plex-tunnel/pkg/client"
 )
 
 type clientController struct {
@@ -283,6 +284,22 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
           <span class="value">{{.Status.Subdomain}}</span>
         </div>
         <div class="item">
+          <span class="label">Session ID <span class="info-bubble" tabindex="0" data-tip="Logical tunnel session identifier shared across all pooled websocket connections.">i</span></span>
+          <span class="value">{{if .Status.SessionID}}{{.Status.SessionID}}{{else}}-{{end}}</span>
+        </div>
+        <div class="item">
+          <span class="label">Active Connections <span class="info-bubble" tabindex="0" data-tip="Currently connected websocket count in the active tunnel session.">i</span></span>
+          <span class="value">{{.Status.ActiveConnections}}</span>
+        </div>
+        <div class="item">
+          <span class="label">Pool Size <span class="info-bubble" tabindex="0" data-tip="Server-granted connection pool size for this session.">i</span></span>
+          <span class="value">{{.Status.MaxConnections}}</span>
+        </div>
+        <div class="item">
+          <span class="label">Control Connection <span class="info-bubble" tabindex="0" data-tip="Connection index currently responsible for ping/pong and control duties.">i</span></span>
+          <span class="value">{{.Status.ControlConnection}}</span>
+        </div>
+        <div class="item">
           <span class="label">Reconnect Attempt <span class="info-bubble" tabindex="0" data-tip="Number of current retry attempt after a disconnection.">i</span></span>
           <span class="value">{{.Status.ReconnectAttempt}}</span>
         </div>
@@ -326,6 +343,10 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
         <div>
           <span class="label">Log Level <span class="info-bubble" tabindex="0" data-tip="Logging verbosity: debug, info, warn, error.">i</span></span>
           <input name="log_level" value="{{.Config.LogLevel}}">
+        </div>
+        <div>
+          <span class="label">Max Connections <span class="info-bubble" tabindex="0" data-tip="Requested parallel websocket pool size for protocol v2 sessions. The server may grant a lower value.">i</span></span>
+          <input name="max_connections" value="{{.Config.MaxConnections}}">
         </div>
         <div class="full">
           <button type="submit">Apply And Restart Client</button>
@@ -388,6 +409,14 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	cfg.Subdomain = strings.TrimSpace(r.FormValue("subdomain"))
 	cfg.PlexTarget = strings.TrimSpace(r.FormValue("plex_target"))
 	cfg.LogLevel = strings.TrimSpace(r.FormValue("log_level"))
+	if raw := strings.TrimSpace(r.FormValue("max_connections")); raw != "" {
+		maxConnections, convErr := strconv.Atoi(raw)
+		if convErr != nil || maxConnections < 1 {
+			redirectWithMessage(w, r, "", "max connections must be an integer >= 1")
+			return
+		}
+		cfg.MaxConnections = maxConnections
+	}
 
 	if cfg.Token == "" {
 		redirectWithMessage(w, r, "", "token is required")
@@ -431,11 +460,12 @@ func (h *uiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
 		Status client.ConnectionStatus `json:"status"`
 		Config struct {
-			ServerURL  string `json:"server_url"`
-			Subdomain  string `json:"subdomain"`
-			PlexTarget string `json:"plex_target"`
-			LogLevel   string `json:"log_level"`
-			TokenSet   bool   `json:"token_set"`
+			ServerURL      string `json:"server_url"`
+			Subdomain      string `json:"subdomain"`
+			PlexTarget     string `json:"plex_target"`
+			LogLevel       string `json:"log_level"`
+			MaxConnections int    `json:"max_connections"`
+			TokenSet       bool   `json:"token_set"`
 		} `json:"config"`
 	}{
 		Status: status,
@@ -444,6 +474,7 @@ func (h *uiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	payload.Config.Subdomain = cfg.Subdomain
 	payload.Config.PlexTarget = cfg.PlexTarget
 	payload.Config.LogLevel = cfg.LogLevel
+	payload.Config.MaxConnections = cfg.MaxConnections
 	payload.Config.TokenSet = cfg.Token != ""
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

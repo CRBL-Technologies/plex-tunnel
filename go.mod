@@ -1,11 +1,9 @@
-module github.com/antoinecorbel7/plex-tunnel
-
-// Module path intentionally remains unchanged until a coordinated breaking rename across importers.
+module github.com/CRBL-Technologies/plex-tunnel
 
 go 1.22
 
 require (
-	github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320143406-470a8caab5a9
+	github.com/CRBL-Technologies/plex-tunnel-proto v1.1.0
 	github.com/rs/zerolog v1.33.0
 	nhooyr.io/websocket v1.8.11
 )

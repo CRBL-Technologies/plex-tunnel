@@ -13,7 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/antoinecorbel7/plex-tunnel/pkg/client"
+	"github.com/CRBL-Technologies/plex-tunnel/pkg/client"
 )
 
 func main() {

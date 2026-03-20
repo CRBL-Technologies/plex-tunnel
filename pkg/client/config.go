@@ -15,6 +15,7 @@ type Config struct {
 	Subdomain         string
 	LogLevel          string
 	DebugBandwidthLog bool
+	MaxConnections    int
 	PingInterval      time.Duration
 	PongTimeout       time.Duration
 	MaxReconnectDelay time.Duration
@@ -29,6 +30,7 @@ func LoadConfig() (Config, error) {
 		Subdomain:         strings.TrimSpace(os.Getenv("PLEXTUNNEL_SUBDOMAIN")),
 		LogLevel:          getenvDefault("PLEXTUNNEL_LOG_LEVEL", "info"),
 		DebugBandwidthLog: false,
+		MaxConnections:    4,
 		PingInterval:      30 * time.Second,
 		PongTimeout:       10 * time.Second,
 		MaxReconnectDelay: 60 * time.Second,
@@ -72,6 +74,17 @@ func LoadConfig() (Config, error) {
 			return Config{}, fmt.Errorf("invalid PLEXTUNNEL_MAX_RECONNECT_DELAY: %w", err)
 		}
 		cfg.MaxReconnectDelay = delay
+	}
+
+	if maxConnectionsValue := strings.TrimSpace(os.Getenv("PLEXTUNNEL_MAX_CONNECTIONS")); maxConnectionsValue != "" {
+		maxConnections, err := strconv.Atoi(maxConnectionsValue)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid PLEXTUNNEL_MAX_CONNECTIONS: %w", err)
+		}
+		if maxConnections < 1 {
+			return Config{}, fmt.Errorf("PLEXTUNNEL_MAX_CONNECTIONS must be >= 1")
+		}
+		cfg.MaxConnections = maxConnections
 	}
 
 	if chunkValue := strings.TrimSpace(os.Getenv("PLEXTUNNEL_RESPONSE_CHUNK_SIZE")); chunkValue != "" {
