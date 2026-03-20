@@ -14,6 +14,7 @@ type Config struct {
 	PlexTarget        string
 	Subdomain         string
 	LogLevel          string
+	DebugBandwidthLog bool
 	PingInterval      time.Duration
 	PongTimeout       time.Duration
 	MaxReconnectDelay time.Duration
@@ -27,6 +28,7 @@ func LoadConfig() (Config, error) {
 		PlexTarget:        getenvDefault("PLEXTUNNEL_PLEX_TARGET", "http://127.0.0.1:32400"),
 		Subdomain:         strings.TrimSpace(os.Getenv("PLEXTUNNEL_SUBDOMAIN")),
 		LogLevel:          getenvDefault("PLEXTUNNEL_LOG_LEVEL", "info"),
+		DebugBandwidthLog: false,
 		PingInterval:      30 * time.Second,
 		PongTimeout:       10 * time.Second,
 		MaxReconnectDelay: 60 * time.Second,
@@ -38,6 +40,14 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.ServerURL == "" {
 		return Config{}, fmt.Errorf("PLEXTUNNEL_SERVER_URL is required")
+	}
+
+	if raw := strings.TrimSpace(os.Getenv("PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING: %w", err)
+		}
+		cfg.DebugBandwidthLog = parsed
 	}
 
 	if pingValue := strings.TrimSpace(os.Getenv("PLEXTUNNEL_PING_INTERVAL")); pingValue != "" {
