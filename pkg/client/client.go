@@ -180,7 +180,7 @@ func (c *Client) readLoop(ctx context.Context, connRef *poolConn) error {
 				connRef.streams.Add(1)
 				defer connRef.streams.Add(-1)
 
-				if err := c.handleHTTPRequest(ctx, connRef.conn, request); err != nil {
+				if err := c.handleHTTPRequest(ctx, connRef, request); err != nil {
 					c.logger.Warn().Err(err).Str("request_id", request.ID).Msg("failed to process proxied request")
 				}
 			}(msg)
@@ -238,10 +238,11 @@ func (c *Client) pingLoop(ctx context.Context, conn *tunnel.WebSocketConnection,
 	}
 }
 
-func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketConnection, msg tunnel.Message) error {
+func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg tunnel.Message) error {
 	if msg.ID == "" {
 		return fmt.Errorf("request without id")
 	}
+	conn := connRef.conn
 
 	targetURL, err := resolveTargetURL(c.cfg.PlexTarget, msg.Path)
 	if err != nil {
@@ -272,6 +273,7 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 		Str("request_id", msg.ID).
 		Str("method", msg.Method).
 		Str("path", msg.Path).
+		Int("connection_index", connRef.index).
 		Logger()
 
 	chunk := make([]byte, c.cfg.ResponseChunkSize)
