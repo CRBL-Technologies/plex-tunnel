@@ -163,44 +163,25 @@ When joining, the server validates:
 If any check fails, the server responds with `MsgError` and closes the
 connection.
 
-### Compatibility Goals and Rollout Constraints
+### Compatibility and Rollout
 
-Desired end state:
+This design now assumes a **coordinated cutover**:
 
-- **Protocol version 1 clients** continue to work in single-connection mode.
-- **Protocol version 2 clients** use pooled connections when both sides support
-  the session fields.
-- A mixed fleet can be upgraded without forcing every client and server to move
-  in lockstep.
+- `plex-tunnel-proto`, `plex-tunnel-server`, and `plex-tunnel` all move to
+  protocol version 2 together before the feature is considered deployable.
+- The existing handshake rule of "exact protocol version match required" stays
+  in place.
+- Mixed-version compatibility is out of scope for the initial implementation.
 
-Current code reality:
+Implications for implementation:
 
-- The current client aborts registration if `RegisterAck.ProtocolVersion` does
-  not exactly match `tunnel.ProtocolVersion`.
-- The current server rejects `Register.ProtocolVersion` when it does not
-  exactly match its own `tunnel.ProtocolVersion`.
-- That means a naive protocol bump from `1` to `2` is a **hard cutover**, not
-  an automatic fallback path.
+- We do **not** need dual-stack server registration logic for v1 and v2.
+- We do **not** need client fallback from a v2 client to a v1 server.
+- We **do** need the protocol/session changes to land in proto first, then be
+  consumed by both server and client before end-to-end testing.
 
-Implications for this design:
-
-- "Version 1 clients continue to work unchanged" is only true if the server is
-  explicitly taught to accept both versions during rollout, or if deployment is
-  a coordinated cutover.
-- "Version 2 clients fall back to a version 1 server" is **not implemented
-  today**. It requires explicit client logic and a server response contract
-  that preserves legacy semantics.
-- Optional JSON fields alone are not enough. Registration validation and
-  handshake behavior must be conditional on protocol version.
-
-Recommended compatibility contract:
-
-- Treat `SessionID` and `MaxConnections` as optional fields that are only
-  meaningful for protocol version 2.
-- Only enable pooled mode after the client receives a version 2
-  `RegisterAck` that includes the negotiated session metadata.
-- If mixed-version rollout is required, the server must accept both v1 and v2
-  registration flows during the migration window.
+The session fields still remain `omitempty` on the wire, but that is now a
+schema convenience rather than a rollout mechanism.
 
 ---
 
@@ -419,23 +400,13 @@ simple static increase is sufficient for the initial implementation.
 All protocol changes live in `plex-tunnel-proto`:
 
 1. Add `SessionID` and `MaxConnections` fields to `Message`.
-2. Decide whether the rollout is:
-   - a coordinated cutover, where both client and server move to
-     `ProtocolVersion = 2` together, or
-   - a mixed-version rollout, where the server accepts both protocol versions
-     during migration.
+2. Bump `ProtocolVersion` to `2` as part of the coordinated cutover.
 3. Update validation:
    - `Register` with `protocol_version: 2` should have `max_connections >= 1`.
    - `RegisterAck` with `protocol_version: 2` should have `session_id` and
      `max_connections`.
-   - `Register` / `RegisterAck` validation must remain version-aware so v1
-     registration is still valid if mixed-version rollout is supported.
 4. No changes to frame encoding — the new fields are just additional JSON
    metadata fields.
-
-If the project wants graceful migration rather than a lockstep upgrade, the
-field additions can land before the protocol version bump. The bump to `2`
-should only happen once both sides agree on the mixed-version handshake rules.
 
 The `WebSocketConnection` struct and `Send`/`Receive` methods are unchanged.
 The pool is built on top of multiple `WebSocketConnection` instances.
@@ -444,15 +415,12 @@ The pool is built on top of multiple `WebSocketConnection` instances.
 
 ## Implementation Order
 
-### Phase 1: Compatibility groundwork
+### Phase 1: Proto groundwork
 
-1. Add `SessionID` and `MaxConnections` to proto `Message` as optional fields.
-2. Decide the rollout model:
-   - coordinated cutover, or
-   - mixed-version migration.
-3. Make `Register` / `RegisterAck` validation conditional on protocol version.
-4. If mixed-version migration is required, teach the server to accept both v1
-   and v2 registration flows before changing the advertised protocol version.
+1. Add `SessionID` and `MaxConnections` to proto `Message`.
+2. Bump `ProtocolVersion` to `2`.
+3. Make `Register` / `RegisterAck` validation enforce the required v2 session
+   fields.
 
 ### Phase 2: Server session support
 
@@ -460,14 +428,13 @@ The pool is built on top of multiple `WebSocketConnection` instances.
 2. Server: handle "join session" registration.
 3. Server: read loops on all session connections.
 4. Server: request dispatch across pool.
-5. Keep v1 behavior available as a single-connection path until migration is
-   complete.
+5. Keep the existing exact-version handshake behavior; reject non-v2 clients.
 
 ### Phase 3: Client connection pool
 
 1. Client: implement `ConnectionPool`.
 2. Client: session establishment (dial control, expand pool).
-3. Client: only enable pooled mode after a v2-capable `RegisterAck`.
+3. Client: require the v2 `RegisterAck` session metadata and fail otherwise.
 4. Client: stream pinning and assignment.
 5. Client: connection failure/recovery within a session.
 6. Client: control/data traffic separation.
@@ -532,12 +499,10 @@ The pool is built on top of multiple `WebSocketConnection` instances.
 
 ## Implementation TODO
 
-> **Rollout decision: mixed-version migration.**
-> The server will accept both v1 and v2 registration flows until all clients
-> are updated. A v1 client connecting to a v2-capable server gets existing
-> single-connection behaviour unchanged. A v2 client connecting to a v1 server
-> will receive a version mismatch error (same as today) — so the server must
-> be updated before clients.
+> **Rollout decision: coordinated cutover.**
+> `plex-tunnel-proto`, `plex-tunnel-server`, and `plex-tunnel` will all move to
+> protocol version 2 together. Exact version matching remains in place, so
+> mixed v1/v2 deployments are out of scope for this initial implementation.
 >
 > Deployment order: proto → server → clients.
 
@@ -547,12 +512,11 @@ or **[client]**.
 ### Phase 1 — Proto (`plex-tunnel-proto`)
 
 - [ ] Add `SessionID string` and `MaxConnections int` to `Message`. Both
-      fields are `omitempty` so v1 messages are unaffected on the wire.
+      fields are `omitempty`.
 - [ ] Update `Validate()` for version-aware checks:
   - `MsgRegister` with `ProtocolVersion == 2`: require `MaxConnections >= 1`.
   - `MsgRegisterAck` with `ProtocolVersion == 2`: require `SessionID` non-empty
     and `MaxConnections >= 1`.
-  - v1 paths stay exactly as they are.
 - [ ] Bump `ProtocolVersion` to `2`.
 - [ ] Tag and release (e.g. `v1.1.0`).
 
@@ -562,8 +526,6 @@ or **[client]**.
       `Session` holds `id`, `subdomain`, `token`, `maxConns`, and a slice of
       `*WebSocketConnection`.
 - [ ] Update `handleTunnel` registration path:
-  - v1 client (`ProtocolVersion == 1`): existing single-connection path,
-    no change.
   - v2 client, `SessionID == ""`: create a new session, assign a UUID, return
     `RegisterAck` with `SessionID` and granted `MaxConnections` (capped by
     token plan limit).
@@ -576,8 +538,7 @@ or **[client]**.
       connections, pick the one with the fewest in-flight streams (least-streams
       strategy), same as described in the Stream Assignment section above.
 - [ ] Update `go.mod` to the new proto release.
-- [ ] Keep v1 single-connection path working throughout — no breaking change to
-      existing clients.
+- [ ] Keep exact-version rejection in place for non-v2 clients.
 
 ### Phase 3 — Client (`plex-tunnel`)
 
@@ -588,11 +549,9 @@ or **[client]**.
       section above for the `poolConn` and assignment logic).
 - [ ] Update `runSession()`:
   - Send `Register` with `ProtocolVersion: 2`, `MaxConnections: cfg.MaxConnections`.
-  - If `RegisterAck.ProtocolVersion == 2` and `RegisterAck.SessionID != ""`:
-    store session ID, dial remaining connections in parallel (staggered ~150 ms
+  - Require `RegisterAck.ProtocolVersion == 2` and `RegisterAck.SessionID != ""`.
+  - Store session ID, dial remaining connections in parallel (staggered ~150 ms
     apart), each sending a join `Register` with the session ID.
-  - If `RegisterAck.ProtocolVersion == 1` (server not yet updated): fall back
-    to single-connection mode silently.
 - [ ] Update `handleHTTPRequest` to accept the connection to send on as a
       parameter; the pool assigns a connection per stream and pins it for all
       chunks of that stream.
@@ -607,7 +566,7 @@ or **[client]**.
 
 - [ ] **[client]** Increase default `ResponseChunkSize` to `262144` (256 KiB)
       when the granted pool size is >= 2. Keep 64 KiB for single-connection
-      sessions to preserve current behaviour for v1 clients.
+      sessions for `MaxConnections == 1`.
 - [ ] **[server]** Add per-connection metrics: bytes sent, active streams,
       p99 write latency.
 - [ ] **[client]** Add pool status to the web UI: connections active,
