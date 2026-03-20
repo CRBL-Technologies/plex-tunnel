@@ -3,7 +3,7 @@
 **Branch:** `claude/review-bandwidth-notes-2oZ1b`
 **Compared to:** `main`
 **Reviewer:** Claude
-**Last updated:** 2026-03-20 (round 1)
+**Last updated:** 2026-03-20 (round 2)
 
 ---
 
@@ -163,3 +163,49 @@ From the Phase 3 TODO in `specs/parallel-connections-design.md`:
 the join register (Issue 1) to match the spec. Issue 2 is an observation with no
 behaviour impact. The missing test for in-flight request failure on connection
 drop is noted — it can ship as a follow-up if the server-side test covers it.
+
+---
+
+## Round 2 — Follow-up changes (commit `db8d31d`)
+
+### What changed
+
+All three round 1 findings addressed:
+
+**Issue 1 resolved.** `MaxConnections` removed from the join register in
+`joinSessionConnection`. The field is no longer sent on the join path, matching
+the spec's handshake diagram exactly.
+
+**Issue 2 resolved.** `pool.remove`'s promotion loop simplified — the redundant
+`i < nextIndex` condition replaced with a `break` after the first non-nil entry,
+since the slice is iterated in order and the first match is always the
+lowest index.
+
+**Test updated.** `TestRunSessionExpandsConnectionPool` now checks
+`MaxConnections` only on the new-session register (where it is required), not on
+join registers (where it is no longer sent). The assertion is moved inside the
+`SessionID == ""` branch, tightening the contract.
+
+**Proto pre-release bumped** to pick up any proto-side changes made alongside
+this work.
+
+### Correctness
+
+- Removing `MaxConnections` from the join register is safe: the server's
+  `joinSession` path never read that field, so no server-side behaviour changes.
+- The `break`-on-first-match simplification is correct: `pool.remove` iterates
+  `p.conns` from index 0, so the first non-nil entry is by definition the
+  lowest index. The previous `i < nextIndex` branch could never be true after
+  the first match.
+
+### Test results
+
+```
+ok  github.com/antoinecorbel7/plex-tunnel/pkg/client  21.984s
+```
+
+All tests pass, race detector clean.
+
+### Verdict
+
+**Approved.** All round 1 findings resolved. No remaining open items.
