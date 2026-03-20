@@ -284,8 +284,13 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 				responseMsg.Headers = tunnel.CloneHeaders(resp.Header)
 				headersSent = true
 			}
-			sendStartedAt := time.Now()
-			if err := conn.Send(responseMsg); err != nil {
+			var sendTiming tunnel.SendTiming
+			if c.cfg.DebugBandwidthLog {
+				sendTiming, err = conn.SendWithTiming(responseMsg)
+			} else {
+				err = conn.Send(responseMsg)
+			}
+			if err != nil {
 				return fmt.Errorf("send response chunk: %w", err)
 			}
 			if c.cfg.DebugBandwidthLog {
@@ -295,7 +300,10 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 					Bool("end_stream", responseMsg.EndStream).
 					Int("status", responseMsg.Status).
 					Int64("plex_read_ms", readCompletedAt.Sub(readStartedAt).Milliseconds()).
-					Int64("tunnel_write_ms", time.Since(sendStartedAt).Milliseconds()).
+					Int64("tunnel_write_ms", sendTiming.Total().Milliseconds()).
+					Int64("write_lock_wait_ms", sendTiming.WriteLockWait.Milliseconds()).
+					Int64("frame_encode_ms", sendTiming.FrameEncode.Milliseconds()).
+					Int64("ws_write_ms", sendTiming.WebSocketWrite.Milliseconds()).
 					Msg("proxied response chunk timing")
 			}
 			chunkIndex++
@@ -315,8 +323,13 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 		finalMsg.Headers = tunnel.CloneHeaders(resp.Header)
 	}
 
-	finalSendStartedAt := time.Now()
-	if err := conn.Send(finalMsg); err != nil {
+	var finalSendTiming tunnel.SendTiming
+	if c.cfg.DebugBandwidthLog {
+		finalSendTiming, err = conn.SendWithTiming(finalMsg)
+	} else {
+		err = conn.Send(finalMsg)
+	}
+	if err != nil {
 		return fmt.Errorf("send final response chunk: %w", err)
 	}
 	if c.cfg.DebugBandwidthLog {
@@ -325,7 +338,10 @@ func (c *Client) handleHTTPRequest(ctx context.Context, conn *tunnel.WebSocketCo
 			Int("bytes", len(finalMsg.Body)).
 			Bool("end_stream", finalMsg.EndStream).
 			Int("status", finalMsg.Status).
-			Int64("tunnel_write_ms", time.Since(finalSendStartedAt).Milliseconds()).
+			Int64("tunnel_write_ms", finalSendTiming.Total().Milliseconds()).
+			Int64("write_lock_wait_ms", finalSendTiming.WriteLockWait.Milliseconds()).
+			Int64("frame_encode_ms", finalSendTiming.FrameEncode.Milliseconds()).
+			Int64("ws_write_ms", finalSendTiming.WebSocketWrite.Milliseconds()).
 			Msg("proxied response chunk timing")
 	}
 

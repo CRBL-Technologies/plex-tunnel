@@ -64,7 +64,7 @@ All configuration is passed as environment variables:
 | `PLEXTUNNEL_PLEX_TARGET` | no | `http://127.0.0.1:32400` | Address of your local Plex instance |
 | `PLEXTUNNEL_SUBDOMAIN` | no | server-assigned | Fixed subdomain to request |
 | `PLEXTUNNEL_LOG_LEVEL` | no | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
-| `PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING` | no | `false` | Emit per-chunk timing logs for Plex reads and tunnel writes; set `PLEXTUNNEL_LOG_LEVEL=debug` to see them |
+| `PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING` | no | `false` | Emit per-chunk timing logs for Plex reads and tunnel sends, including lock wait, frame encoding, and websocket write time; set `PLEXTUNNEL_LOG_LEVEL=debug` to see them |
 | `PLEXTUNNEL_UI_LISTEN` | no | `127.0.0.1:9090` | Local status UI address; set empty to disable |
 
 ## Status UI
