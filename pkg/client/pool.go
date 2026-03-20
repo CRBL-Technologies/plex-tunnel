@@ -94,9 +94,8 @@ func (p *ConnectionPool) remove(index int) (remaining int, promoted *poolConn, c
 		if connRef == nil {
 			continue
 		}
-		if nextIndex == -1 || i < nextIndex {
-			nextIndex = i
-		}
+		nextIndex = i
+		break
 	}
 	p.controlIndex = nextIndex
 	return remaining, p.conns[nextIndex], true

@@ -281,15 +281,18 @@ func TestRunSessionExpandsConnectionPool(t *testing.T) {
 		if registerMsg.ProtocolVersion != tunnel.ProtocolVersion {
 			t.Fatalf("register protocol_version = %d, want %d", registerMsg.ProtocolVersion, tunnel.ProtocolVersion)
 		}
-		if registerMsg.MaxConnections != 3 {
-			t.Fatalf("register max_connections = %d, want 3", registerMsg.MaxConnections)
-		}
 		if registerMsg.SessionID == "" {
+			if registerMsg.MaxConnections != 3 {
+				t.Fatalf("new session register max_connections = %d, want 3", registerMsg.MaxConnections)
+			}
 			newSessionCount++
 			continue
 		}
 		if registerMsg.SessionID != "sess-1" {
 			t.Fatalf("join session_id = %q, want sess-1", registerMsg.SessionID)
+		}
+		if registerMsg.MaxConnections != 0 {
+			t.Fatalf("join register max_connections = %d, want 0", registerMsg.MaxConnections)
 		}
 		joinSessionCount++
 	}

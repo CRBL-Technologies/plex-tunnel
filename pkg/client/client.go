@@ -529,7 +529,6 @@ func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool
 		Subdomain:       pool.subdomain,
 		ProtocolVersion: tunnel.ProtocolVersion,
 		SessionID:       pool.sessionID,
-		MaxConnections:  pool.maxConns,
 	}
 	if err := conn.Send(register); err != nil {
 		_ = conn.Close()
