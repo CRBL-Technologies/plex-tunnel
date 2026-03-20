@@ -1,10 +1,9 @@
 module github.com/CRBL-Technologies/plex-tunnel
 
-
 go 1.22
 
 require (
-	github.com/CRBL-Technologies/plex-tunnel-proto v1.0.1-0.20260320171629-b707af125a4d
+	github.com/CRBL-Technologies/plex-tunnel-proto v1.1.0
 	github.com/rs/zerolog v1.33.0
 	nhooyr.io/websocket v1.8.11
 )
