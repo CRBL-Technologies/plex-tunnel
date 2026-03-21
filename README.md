@@ -1,6 +1,6 @@
-# PlexTunnel Client
+# Portless Client
 
-PlexTunnel Client runs next to your Plex server and opens an outbound encrypted tunnel to PlexTunnel Server, making your Plex accessible remotely without port forwarding.
+Portless Client runs next to your Plex server and opens an outbound encrypted tunnel to Portless Server, making your Plex accessible remotely without port forwarding.
 
 ## Install
 
@@ -14,8 +14,8 @@ curl -O https://raw.githubusercontent.com/CRBL-Technologies/plex-tunnel/main/doc
 
 Open `docker-compose.client.yml` and replace the two placeholder values:
 
-- `your-token-here` → your token from the PlexTunnel dashboard
-- `wss://tunnel.example.com` → the WebSocket URL of your PlexTunnel server
+- `your-token-here` → your token from the Portless dashboard
+- `wss://tunnel.example.com` → the WebSocket URL of your Portless server
 
 Then start the client:
 
@@ -27,7 +27,7 @@ All values in the compose file use `${VAR:-placeholder}` syntax — you can edit
 
 **Already running Plex in Docker?** The compose file has a commented-out Plex block at the top — paste your existing Plex service there to manage both containers together.
 
-**Starting from scratch with Plex?** Use `docker-compose.yml` instead, which includes a full Plex + PlexTunnel stack. Replace the placeholder values for `PLEX_CLAIM`, `PLEXTUNNEL_TOKEN`, `PLEXTUNNEL_SERVER_URL`, and the volume paths:
+**Starting from scratch with Plex?** Use `docker-compose.yml` instead, which includes a full Plex + Portless stack. Replace the placeholder values for `PLEX_CLAIM`, `PLEXTUNNEL_TOKEN`, `PLEXTUNNEL_SERVER_URL`, and the volume paths:
 
 ```bash
 curl -O https://raw.githubusercontent.com/CRBL-Technologies/plex-tunnel/main/docker-compose.yml
@@ -59,7 +59,7 @@ All configuration is passed as environment variables:
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PLEXTUNNEL_TOKEN` | yes | — | Token from the PlexTunnel dashboard |
+| `PLEXTUNNEL_TOKEN` | yes | — | Token from the Portless dashboard |
 | `PLEXTUNNEL_SERVER_URL` | yes | — | WebSocket URL of the server, e.g. `wss://tunnel.example.com` |
 | `PLEXTUNNEL_PLEX_TARGET` | no | `http://127.0.0.1:32400` | Address of your local Plex instance |
 | `PLEXTUNNEL_SUBDOMAIN` | no | server-assigned | Fixed subdomain to request |

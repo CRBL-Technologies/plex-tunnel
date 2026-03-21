@@ -1,6 +1,6 @@
 # Repository Guide
 
-This repository contains the PlexTunnel client.
+This repository contains the Portless client.
 
 ## Main Files
 
