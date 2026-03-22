@@ -311,6 +311,134 @@ func TestRunSessionExpandsConnectionPool(t *testing.T) {
 	}
 }
 
+func TestRunSessionHandlesMaxConnectionsUpdate(t *testing.T) {
+	serverErrCh := make(chan error, 8)
+	registerCh := make(chan tunnel.Message, 4)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := tunnel.AcceptWebSocket(w, r)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer conn.Close()
+
+		registerMsg, err := conn.Receive()
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		registerCh <- registerMsg
+
+		if registerMsg.SessionID == "" {
+			if err := conn.Send(tunnel.Message{
+				Type:            tunnel.MsgRegisterAck,
+				Subdomain:       "myplex",
+				ProtocolVersion: tunnel.ProtocolVersion,
+				SessionID:       "sess-1",
+				MaxConnections:  1,
+			}); err != nil {
+				serverErrCh <- err
+				return
+			}
+
+			time.Sleep(50 * time.Millisecond)
+			if err := conn.Send(tunnel.Message{
+				Type:           tunnel.MsgMaxConnectionsUpdate,
+				MaxConnections: 3,
+			}); err != nil {
+				serverErrCh <- err
+				return
+			}
+
+			<-r.Context().Done()
+			return
+		}
+
+		if err := conn.Send(tunnel.Message{
+			Type:            tunnel.MsgRegisterAck,
+			Subdomain:       "myplex",
+			ProtocolVersion: tunnel.ProtocolVersion,
+			SessionID:       "sess-1",
+			MaxConnections:  3,
+		}); err != nil {
+			serverErrCh <- err
+			return
+		}
+
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		Token:             "token-123",
+		ServerURL:         toWebSocketURL(srv.URL),
+		PlexTarget:        "http://127.0.0.1:32400",
+		MaxConnections:    1,
+		PingInterval:      time.Hour,
+		PongTimeout:       time.Hour,
+		MaxReconnectDelay: time.Second,
+		ResponseChunkSize: 1024,
+	}
+
+	c := New(cfg, zerolog.Nop())
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	defer cancel()
+
+	if err := c.runSession(ctx); err != nil {
+		t.Fatalf("runSession() error = %v", err)
+	}
+
+	received := make([]tunnel.Message, 0, 3)
+	for len(received) < 3 {
+		select {
+		case registerMsg := <-registerCh:
+			received = append(received, registerMsg)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for resize-triggered register messages, got %d", len(received))
+		}
+	}
+
+	var newSessionCount int
+	var joinSessionCount int
+	for _, registerMsg := range received {
+		if registerMsg.ProtocolVersion != tunnel.ProtocolVersion {
+			t.Fatalf("register protocol_version = %d, want %d", registerMsg.ProtocolVersion, tunnel.ProtocolVersion)
+		}
+		if registerMsg.SessionID == "" {
+			if registerMsg.MaxConnections != 1 {
+				t.Fatalf("new session register max_connections = %d, want 1", registerMsg.MaxConnections)
+			}
+			newSessionCount++
+			continue
+		}
+		if registerMsg.SessionID != "sess-1" {
+			t.Fatalf("join session_id = %q, want sess-1", registerMsg.SessionID)
+		}
+		if registerMsg.MaxConnections != 0 {
+			t.Fatalf("join register max_connections = %d, want 0", registerMsg.MaxConnections)
+		}
+		joinSessionCount++
+	}
+
+	if newSessionCount != 1 {
+		t.Fatalf("new session register count = %d, want 1", newSessionCount)
+	}
+	if joinSessionCount != 2 {
+		t.Fatalf("join session register count = %d, want 2", joinSessionCount)
+	}
+
+	if status := c.SnapshotStatus(); status.MaxConnections != 3 {
+		t.Fatalf("status.MaxConnections = %d, want 3", status.MaxConnections)
+	}
+
+	select {
+	case err := <-serverErrCh:
+		t.Fatalf("server error: %v", err)
+	default:
+	}
+}
+
 func toWebSocketURL(httpURL string) string {
 	return "ws" + strings.TrimPrefix(httpURL, "http")
 }
