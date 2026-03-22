@@ -1,6 +1,6 @@
 module github.com/CRBL-Technologies/plex-tunnel
 
-go 1.22
+go 1.25
 
 require (
 	github.com/CRBL-Technologies/plex-tunnel-proto v1.1.0
