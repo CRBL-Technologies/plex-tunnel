@@ -26,6 +26,72 @@ type Client struct {
 	state   ConnectionStatus
 }
 
+type sessionPoolController struct {
+	mu     sync.Mutex
+	client *Client
+	ctx    context.Context
+	pool   *ConnectionPool
+	errCh  chan<- error
+}
+
+func newSessionPoolController(
+	client *Client,
+	ctx context.Context,
+	pool *ConnectionPool,
+	errCh chan<- error,
+) *sessionPoolController {
+	return &sessionPoolController{
+		client: client,
+		ctx:    ctx,
+		pool:   pool,
+		errCh:  errCh,
+	}
+}
+
+func (s *sessionPoolController) startSlot(index int, initialConn *tunnel.WebSocketConnection) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startSlotLocked(index, initialConn)
+}
+
+func (s *sessionPoolController) startSlotLocked(index int, initialConn *tunnel.WebSocketConnection) {
+	slotCtx, cancel := context.WithCancel(s.ctx)
+	s.pool.setSlotCancel(index, cancel)
+	go s.client.maintainPoolSlot(slotCtx, s, index, initialConn)
+}
+
+func (s *sessionPoolController) resize(newMax int) {
+	s.mu.Lock()
+	oldMax, updatedMax, promoted := s.pool.Resize(newMax)
+	if updatedMax == oldMax {
+		s.mu.Unlock()
+		return
+	}
+
+	s.client.logger.Info().
+		Int("old_max_connections", oldMax).
+		Int("new_max_connections", updatedMax).
+		Msg("updated tunnel connection pool size")
+
+	if promoted != nil {
+		s.client.logger.Info().
+			Str("session_id", s.pool.sessionID).
+			Int("connection_index", promoted.index).
+			Msg("promoted tunnel session control connection")
+		s.client.startPoolPingLoop(s.ctx, s.pool, promoted)
+	}
+
+	for index := oldMax; index < updatedMax; index++ {
+		s.startSlotLocked(index, nil)
+	}
+	s.mu.Unlock()
+
+	s.client.syncPoolStatus(s.pool)
+	s.client.updateStatus(func(status *ConnectionStatus) {
+		status.MaxConnections = updatedMax
+	})
+}
+
 func New(cfg Config, logger zerolog.Logger) *Client {
 	return &Client{
 		cfg:    cfg,
@@ -151,12 +217,13 @@ func (c *Client) runSession(ctx context.Context) error {
 		Msg("client registered")
 
 	errCh := make(chan error, 1)
+	session := newSessionPoolController(c, sessionCtx, pool, errCh)
 	for index := 0; index < registerAck.MaxConnections; index++ {
 		var initialConn *tunnel.WebSocketConnection
 		if index == 0 {
 			initialConn = controlConn
 		}
-		go c.maintainPoolSlot(sessionCtx, pool, index, initialConn, errCh)
+		session.startSlot(index, initialConn)
 	}
 
 	select {
@@ -167,7 +234,7 @@ func (c *Client) runSession(ctx context.Context) error {
 	}
 }
 
-func (c *Client) readLoop(ctx context.Context, connRef *poolConn) error {
+func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, connRef *poolConn) error {
 	for {
 		msg, err := connRef.conn.Receive()
 		if err != nil {
@@ -206,6 +273,8 @@ func (c *Client) readLoop(ctx context.Context, connRef *poolConn) error {
 				Str("session_id", msg.SessionID).
 				Int("connection_index", connRef.index).
 				Msg("received register ack")
+		case tunnel.MsgMaxConnectionsUpdate:
+			session.resize(msg.MaxConnections)
 		case tunnel.MsgWSOpen, tunnel.MsgWSFrame, tunnel.MsgWSClose, tunnel.MsgKeyExchange:
 			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported websocket message type")
 		default:
@@ -398,11 +467,11 @@ func sendErr(errCh chan<- error, err error) {
 
 func (c *Client) maintainPoolSlot(
 	ctx context.Context,
-	pool *ConnectionPool,
+	session *sessionPoolController,
 	index int,
 	initialConn *tunnel.WebSocketConnection,
-	errCh chan<- error,
 ) {
+	pool := session.pool
 	conn := initialConn
 	attempt := 0
 
@@ -423,8 +492,11 @@ func (c *Client) maintainPoolSlot(
 			var err error
 			conn, err = c.joinSessionConnection(ctx, pool)
 			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
 				if pool.activeCount() == 0 {
-					sendErr(errCh, fmt.Errorf("all tunnel connections lost: %w", err))
+					sendErr(session.errCh, fmt.Errorf("all tunnel connections lost: %w", err))
 					return
 				}
 
@@ -447,11 +519,20 @@ func (c *Client) maintainPoolSlot(
 			attempt = 0
 		}
 
+		if ctx.Err() != nil {
+			_ = conn.Close()
+			return
+		}
+
 		connRef, isControl := pool.add(index, conn)
+		if connRef == nil {
+			_ = conn.Close()
+			return
+		}
 		c.syncPoolStatus(pool)
 
 		if isControl {
-			c.startPoolPingLoop(ctx, pool, connRef)
+			c.startPoolPingLoop(session.ctx, pool, connRef)
 		}
 
 		c.logger.Info().
@@ -460,7 +541,7 @@ func (c *Client) maintainPoolSlot(
 			Bool("control", isControl).
 			Msg("tunnel session connection active")
 
-		err := c.readLoop(ctx, connRef)
+		err := c.readLoop(ctx, session, connRef)
 		if ctx.Err() != nil {
 			return
 		}
@@ -482,12 +563,12 @@ func (c *Client) maintainPoolSlot(
 				Str("session_id", pool.sessionID).
 				Int("connection_index", promoted.index).
 				Msg("promoted tunnel session control connection")
-			c.startPoolPingLoop(ctx, pool, promoted)
+			c.startPoolPingLoop(session.ctx, pool, promoted)
 			c.syncPoolStatus(pool)
 		}
 
 		if remaining == 0 {
-			sendErr(errCh, fmt.Errorf("all tunnel connections lost"))
+			sendErr(session.errCh, fmt.Errorf("all tunnel connections lost"))
 			return
 		}
 
@@ -550,9 +631,10 @@ func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool
 		_ = conn.Close()
 		return nil, fmt.Errorf("server returned mismatched session id %q for join %q", registerAck.SessionID, pool.sessionID)
 	}
-	if registerAck.MaxConnections != pool.maxConns {
+	expectedMaxConnections := pool.maxConnections()
+	if registerAck.MaxConnections != expectedMaxConnections {
 		_ = conn.Close()
-		return nil, fmt.Errorf("server returned mismatched max connections %d for session %d", registerAck.MaxConnections, pool.maxConns)
+		return nil, fmt.Errorf("server returned mismatched max connections %d, want %d", registerAck.MaxConnections, expectedMaxConnections)
 	}
 	if registerAck.Subdomain != pool.subdomain {
 		_ = conn.Close()
@@ -570,7 +652,7 @@ func (c *Client) syncPoolStatus(pool *ConnectionPool) {
 		s.Subdomain = pool.subdomain
 		s.SessionID = pool.sessionID
 		s.ActiveConnections = snapshot.active
-		s.MaxConnections = pool.maxConns
+		s.MaxConnections = snapshot.maxConns
 		s.ControlConnection = snapshot.controlIndex
 	})
 }

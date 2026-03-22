@@ -18,6 +18,7 @@ type ConnectionPool struct {
 	mu sync.RWMutex
 
 	conns        []*poolConn
+	slotCancels  []context.CancelFunc
 	sessionID    string
 	subdomain    string
 	server       string
@@ -36,6 +37,7 @@ type poolConn struct {
 type poolSnapshot struct {
 	active       int
 	controlIndex int
+	maxConns     int
 }
 
 func newConnectionPool(server, subdomain, sessionID string, maxConns int) *ConnectionPool {
@@ -44,6 +46,7 @@ func newConnectionPool(server, subdomain, sessionID string, maxConns int) *Conne
 	}
 	return &ConnectionPool{
 		conns:        make([]*poolConn, maxConns),
+		slotCancels:  make([]context.CancelFunc, maxConns),
 		sessionID:    sessionID,
 		subdomain:    subdomain,
 		server:       server,
@@ -56,13 +59,33 @@ func (p *ConnectionPool) add(index int, conn *tunnel.WebSocketConnection) (*pool
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if index < 0 || index >= len(p.conns) {
+		return nil, false
+	}
+
+	activeBefore := p.activeCountLocked()
+	controlMissing := p.controlIndex < 0 || p.controlIndex >= len(p.conns) || p.conns[p.controlIndex] == nil
+
 	connRef := &poolConn{
 		conn:  conn,
 		index: index,
 	}
 	connRef.lastPong.Store(time.Now().UnixNano())
 	p.conns[index] = connRef
+	if controlMissing && activeBefore == 0 {
+		p.controlIndex = index
+	}
 	return connRef, index == p.controlIndex
+}
+
+func (p *ConnectionPool) setSlotCancel(index int, cancel context.CancelFunc) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if index < 0 || index >= len(p.slotCancels) {
+		return
+	}
+	p.slotCancels[index] = cancel
 }
 
 func (p *ConnectionPool) remove(index int) (remaining int, promoted *poolConn, controlLost bool) {
@@ -83,6 +106,9 @@ func (p *ConnectionPool) remove(index int) (remaining int, promoted *poolConn, c
 
 	remaining = p.activeCountLocked()
 	if remaining == 0 {
+		if len(p.conns) > 0 {
+			p.controlIndex = 0
+		}
 		return 0, nil, controlLost
 	}
 	if !controlLost {
@@ -119,6 +145,7 @@ func (p *ConnectionPool) snapshot() poolSnapshot {
 	return poolSnapshot{
 		active:       p.activeCountLocked(),
 		controlIndex: p.controlIndex,
+		maxConns:     p.maxConns,
 	}
 }
 
@@ -138,6 +165,81 @@ func (p *ConnectionPool) activeCountLocked() int {
 	return active
 }
 
+func (p *ConnectionPool) maxConnections() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.maxConns
+}
+
+func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *poolConn) {
+	if newMax < 1 {
+		newMax = 1
+	}
+
+	p.mu.Lock()
+	oldMax = p.maxConns
+	if newMax == oldMax {
+		p.mu.Unlock()
+		return oldMax, oldMax, nil
+	}
+
+	if newMax > oldMax {
+		p.conns = append(p.conns, make([]*poolConn, newMax-oldMax)...)
+		p.slotCancels = append(p.slotCancels, make([]context.CancelFunc, newMax-oldMax)...)
+		p.maxConns = newMax
+		p.mu.Unlock()
+		return oldMax, newMax, nil
+	}
+
+	removedConns := make([]*poolConn, 0, oldMax-newMax)
+	removedCancels := make([]context.CancelFunc, 0, oldMax-newMax)
+	var pingCancel context.CancelFunc
+
+	if p.controlIndex >= newMax {
+		for i := 0; i < newMax; i++ {
+			if p.conns[i] == nil {
+				continue
+			}
+			p.controlIndex = i
+			promoted = p.conns[i]
+			break
+		}
+		if promoted == nil {
+			p.controlIndex = 0
+		}
+		pingCancel = p.pingCancel
+		p.pingCancel = nil
+	}
+
+	for i := oldMax - 1; i >= newMax; i-- {
+		if p.conns[i] != nil {
+			removedConns = append(removedConns, p.conns[i])
+			p.conns[i] = nil
+		}
+		if p.slotCancels[i] != nil {
+			removedCancels = append(removedCancels, p.slotCancels[i])
+			p.slotCancels[i] = nil
+		}
+	}
+
+	p.conns = p.conns[:newMax]
+	p.slotCancels = p.slotCancels[:newMax]
+	p.maxConns = newMax
+	p.mu.Unlock()
+
+	if pingCancel != nil {
+		pingCancel()
+	}
+	for _, cancel := range removedCancels {
+		cancel()
+	}
+	for _, connRef := range removedConns {
+		_ = connRef.conn.Close()
+	}
+
+	return oldMax, newMax, promoted
+}
+
 func (p *ConnectionPool) close() {
 	p.mu.Lock()
 	conns := make([]*poolConn, 0, len(p.conns))
@@ -146,11 +248,20 @@ func (p *ConnectionPool) close() {
 			conns = append(conns, connRef)
 		}
 	}
+	slotCancels := make([]context.CancelFunc, 0, len(p.slotCancels))
+	for _, cancel := range p.slotCancels {
+		if cancel != nil {
+			slotCancels = append(slotCancels, cancel)
+		}
+	}
 	cancel := p.pingCancel
 	p.pingCancel = nil
 	p.mu.Unlock()
 
 	if cancel != nil {
+		cancel()
+	}
+	for _, cancel := range slotCancels {
 		cancel()
 	}
 	for _, connRef := range conns {
