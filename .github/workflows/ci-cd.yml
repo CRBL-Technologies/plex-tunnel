@@ -2,9 +2,9 @@ name: Client CI/CD
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -81,12 +81,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      - name: Set image tags
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "dev" ]; then
+            {
+              echo "IMAGE_TAGS<<EOF"
+              echo "${IMAGE_NAME}:sha-${GITHUB_SHA}"
+              echo "${IMAGE_NAME}:dev"
+              echo "EOF"
+            } >> "$GITHUB_ENV"
+          else
+            {
+              echo "IMAGE_TAGS<<EOF"
+              echo "${IMAGE_NAME}:sha-${GITHUB_SHA}"
+              echo "${IMAGE_NAME}:latest"
+              echo "EOF"
+            } >> "$GITHUB_ENV"
+          fi
+
       - name: Build and push
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           context: .
           file: Dockerfile.client
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.IMAGE_TAGS }}
