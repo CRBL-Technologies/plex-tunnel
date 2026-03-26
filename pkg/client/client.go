@@ -312,15 +312,21 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 		return fmt.Errorf("request without id")
 	}
 	conn := connRef.conn
+	if msg.Method == "" && msg.Path == "" {
+		c.logger.Warn().Str("request_id", msg.ID).Msg("rejected continuation request frame (not supported)")
+		return c.sendProxyError(conn, msg.ID, http.StatusNotImplemented, "streaming requests not supported")
+	}
 
 	targetURL, err := resolveTargetURL(c.cfg.PlexTarget, msg.Path)
 	if err != nil {
-		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("invalid target path: %v", err))
+		c.logger.Warn().Err(err).Str("request_id", msg.ID).Msg("target path resolution failed")
+		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "bad gateway")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, msg.Method, targetURL, bytes.NewReader(msg.Body))
 	if err != nil {
-		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("build proxied request: %v", err))
+		c.logger.Warn().Err(err).Str("request_id", msg.ID).Msg("failed to build proxied request")
+		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "bad gateway")
 	}
 
 	for key, values := range msg.Headers {
@@ -334,7 +340,8 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, fmt.Sprintf("request to plex failed: %v", err))
+		c.logger.Warn().Err(err).Str("request_id", msg.ID).Msg("upstream plex request failed")
+		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "upstream unavailable")
 	}
 	defer resp.Body.Close()
 
@@ -449,10 +456,16 @@ func resolveTargetURL(baseTarget string, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse base target: %w", err)
 	}
+	if path == "" {
+		path = "/"
+	}
 
 	rel, err := url.Parse(path)
 	if err != nil {
 		return "", fmt.Errorf("parse request path: %w", err)
+	}
+	if rel.Scheme != "" || rel.Host != "" || !strings.HasPrefix(rel.Path, "/") {
+		return "", fmt.Errorf("blocked: path must be a relative path")
 	}
 
 	return base.ResolveReference(rel).String(), nil
