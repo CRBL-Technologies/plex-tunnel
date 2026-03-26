@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"html/template"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -114,6 +118,7 @@ func (c *clientController) Snapshot() (client.Config, client.ConnectionStatus) {
 type uiHandler struct {
 	controller *clientController
 	logger     zerolog.Logger
+	uiToken    string
 }
 
 type statusPageData struct {
@@ -121,6 +126,103 @@ type statusPageData struct {
 	Config  client.Config
 	Message string
 	Error   string
+}
+
+// generateUIToken creates a random 32-byte hex token for UI auth.
+func generateUIToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+// resolveUIToken returns the token to use for UI auth and whether it was auto-generated.
+// Returns empty string if auth should be disabled.
+func resolveUIToken(listenAddr string, logger zerolog.Logger) string {
+	if token := strings.TrimSpace(getenvDefault("PLEXTUNNEL_UI_TOKEN", "")); token != "" {
+		return token
+	}
+
+	// No token configured — warn if listening on a non-loopback address.
+	host, _, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		host = listenAddr
+	}
+	if host != "" && host != "127.0.0.1" && host != "::1" && host != "localhost" {
+		logger.Warn().
+			Str("addr", listenAddr).
+			Msg("UI listening on non-localhost without PLEXTUNNEL_UI_TOKEN — consider setting a token for security")
+	}
+	return ""
+}
+
+const loginPageHTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PlexTunnel — Login</title>
+  <style>
+    :root { --bg: #0b0f14; --card: #101722; --border: #2a3648; --text: #e7edf5; --accent: #4dabf7; --bad: #ffb1b1; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", sans-serif; color: var(--text); background: var(--bg); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 400px; }
+    h1 { margin: 0 0 16px; font-size: 1.2rem; }
+    input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #0d141e; color: var(--text); font-family: monospace; margin-bottom: 12px; }
+    button { width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #051321; font-weight: 700; cursor: pointer; }
+    .err { color: var(--bad); font-size: .9rem; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>PlexTunnel Client UI</h1>
+    {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
+    <form method="post" action="/login">
+      <input type="password" name="token" placeholder="UI Token" required autofocus>
+      <button type="submit">Login</button>
+    </form>
+  </div>
+</body>
+</html>`
+
+var loginPageTmpl = template.Must(template.New("login").Parse(loginPageHTML))
+
+// tokenAuthMiddleware wraps a handler and requires a valid UI token.
+func tokenAuthMiddleware(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow login endpoint through.
+		if r.URL.Path == "/login" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check Authorization header (for API clients).
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			if strings.HasPrefix(auth, "Bearer ") {
+				provided := strings.TrimPrefix(auth, "Bearer ")
+				if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1 {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Check cookie (for browser).
+		if cookie, err := r.Cookie("ui_token"); err == nil {
+			if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// No valid auth — show login page.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = loginPageTmpl.Execute(w, struct{ Error string }{})
+	})
 }
 
 var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap{
@@ -359,16 +461,22 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 </body>
 </html>`))
 
-func newUIHandler(controller *clientController, logger zerolog.Logger) http.Handler {
+func newUIHandler(controller *clientController, logger zerolog.Logger, uiToken string) http.Handler {
 	h := &uiHandler{
 		controller: controller,
 		logger:     logger,
+		uiToken:    uiToken,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/settings", h.handleSettings)
 	mux.HandleFunc("/api/status", h.handleStatus)
+	mux.HandleFunc("/login", h.handleLogin)
+
+	if uiToken != "" {
+		return tokenAuthMiddleware(uiToken, mux)
+	}
 	return mux
 }
 
@@ -479,6 +587,38 @@ func (h *uiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (h *uiHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = loginPageTmpl.Execute(w, struct{ Error string }{"Failed to parse form."})
+		return
+	}
+
+	provided := strings.TrimSpace(r.FormValue("token"))
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(h.uiToken)) != 1 {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = loginPageTmpl.Execute(w, struct{ Error string }{"Invalid token."})
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "ui_token",
+		Value:    h.uiToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400 * 30, // 30 days
+	})
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func redirectWithMessage(w http.ResponseWriter, r *http.Request, message string, errMessage string) {

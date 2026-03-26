@@ -41,9 +41,14 @@ func main() {
 
 	uiListen := getenvDefault("PLEXTUNNEL_UI_LISTEN", "127.0.0.1:9090")
 	if uiListen != "" {
+		uiToken := resolveUIToken(uiListen, logger)
+		if uiToken != "" {
+			logger.Info().Msg("UI token authentication enabled")
+		}
+
 		srv := &http.Server{
 			Addr:    uiListen,
-			Handler: newUIHandler(controller, logger),
+			Handler: newUIHandler(controller, logger, uiToken),
 		}
 
 		go func() {
