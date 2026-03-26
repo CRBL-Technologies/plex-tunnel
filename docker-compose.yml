@@ -15,6 +15,12 @@ services:
     container_name: plextunnel-client
     restart: unless-stopped
     network_mode: host
+    user: "65532:65532"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     environment:
       - PLEXTUNNEL_TOKEN=${PLEXTUNNEL_TOKEN:-your-token-here}
       - PLEXTUNNEL_SERVER_URL=${PLEXTUNNEL_SERVER_URL:-wss://tunnel.example.com}

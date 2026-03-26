@@ -8,4 +8,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /plextunnel-client ./cmd/client
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /plextunnel-client /usr/local/bin/plextunnel-client
+RUN addgroup -g 65532 -S plextunnel && adduser -u 65532 -S -G plextunnel -h /nonexistent -s /sbin/nologin plextunnel
+USER plextunnel:plextunnel
 ENTRYPOINT ["plextunnel-client"]

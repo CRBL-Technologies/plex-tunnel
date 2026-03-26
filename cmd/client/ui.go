@@ -137,24 +137,32 @@ func generateUIToken() string {
 	return hex.EncodeToString(b)
 }
 
-// resolveUIToken returns the token to use for UI auth and whether it was auto-generated.
+// resolveUIToken returns the token to use for UI auth.
 // Returns empty string if auth should be disabled.
 func resolveUIToken(listenAddr string, logger zerolog.Logger) string {
 	if token := strings.TrimSpace(getenvDefault("PLEXTUNNEL_UI_TOKEN", "")); token != "" {
 		return token
 	}
 
-	// No token configured — warn if listening on a non-loopback address.
+	// Localhost users keep auth disabled for convenience. Anything else fails closed.
 	host, _, err := net.SplitHostPort(listenAddr)
 	if err != nil {
 		host = listenAddr
 	}
-	if host != "" && host != "127.0.0.1" && host != "::1" && host != "localhost" {
-		logger.Warn().
-			Str("addr", listenAddr).
-			Msg("UI listening on non-localhost without PLEXTUNNEL_UI_TOKEN — consider setting a token for security")
+	host = strings.TrimSpace(host)
+	if host == "localhost" {
+		return ""
 	}
-	return ""
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return ""
+	}
+
+	token := generateUIToken()
+	logger.Info().
+		Str("addr", listenAddr).
+		Str("token", token).
+		Msg("UI bound to non-localhost — auto-generated UI token (set PLEXTUNNEL_UI_TOKEN to use your own)")
+	return token
 }
 
 const loginPageHTML = `<!doctype html>
