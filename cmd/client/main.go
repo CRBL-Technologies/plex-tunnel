@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -40,15 +41,19 @@ func main() {
 	defer controller.Stop()
 
 	uiListen := getenvDefault("PLEXTUNNEL_UI_LISTEN", "127.0.0.1:9090")
+	uiPassword := os.Getenv("PLEXTUNNEL_UI_PASSWORD")
 	if uiListen != "" {
-		uiToken := resolveUIToken(uiListen, logger)
-		if uiToken != "" {
-			logger.Info().Msg("UI token authentication enabled")
+		if !isLoopbackUIListen(uiListen) && uiPassword == "" {
+			logger.Warn().Msg("UI bound to non-loopback address without password — set PLEXTUNNEL_UI_PASSWORD to protect it")
 		}
 
 		srv := &http.Server{
-			Addr:    uiListen,
-			Handler: newUIHandler(controller, logger, uiToken),
+			Addr:              uiListen,
+			Handler:           newUIHandler(controller, logger, uiPassword),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
 		}
 
 		go func() {
@@ -78,4 +83,22 @@ func getenvDefault(key string, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func isLoopbackUIListen(addr string) bool {
+	host := strings.TrimSpace(addr)
+	if host == "" || strings.HasPrefix(host, ":") {
+		return false
+	}
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }

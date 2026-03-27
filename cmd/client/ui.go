@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"html/template"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -19,6 +16,8 @@ import (
 
 	"github.com/CRBL-Technologies/plex-tunnel/pkg/client"
 )
+
+const tokenPlaceholder = "\x00unchanged\x00"
 
 type clientController struct {
 	rootCtx context.Context
@@ -118,119 +117,14 @@ func (c *clientController) Snapshot() (client.Config, client.ConnectionStatus) {
 type uiHandler struct {
 	controller *clientController
 	logger     zerolog.Logger
-	uiToken    string
 }
 
 type statusPageData struct {
-	Status  client.ConnectionStatus
-	Config  client.Config
-	Message string
-	Error   string
-}
-
-// generateUIToken creates a random 32-byte hex token for UI auth.
-func generateUIToken() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return hex.EncodeToString(b)
-}
-
-// resolveUIToken returns the token to use for UI auth.
-// Returns empty string if auth should be disabled.
-func resolveUIToken(listenAddr string, logger zerolog.Logger) string {
-	if token := strings.TrimSpace(getenvDefault("PLEXTUNNEL_UI_TOKEN", "")); token != "" {
-		return token
-	}
-
-	// Localhost users keep auth disabled for convenience. Anything else fails closed.
-	host, _, err := net.SplitHostPort(listenAddr)
-	if err != nil {
-		host = listenAddr
-	}
-	host = strings.TrimSpace(host)
-	if host == "localhost" {
-		return ""
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return ""
-	}
-
-	token := generateUIToken()
-	logger.Info().
-		Str("addr", listenAddr).
-		Str("token", token).
-		Msg("UI bound to non-localhost — auto-generated UI token (set PLEXTUNNEL_UI_TOKEN to use your own)")
-	return token
-}
-
-const loginPageHTML = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>PlexTunnel — Login</title>
-  <style>
-    :root { --bg: #0b0f14; --card: #101722; --border: #2a3648; --text: #e7edf5; --accent: #4dabf7; --bad: #ffb1b1; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: "Segoe UI", sans-serif; color: var(--text); background: var(--bg); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 400px; }
-    h1 { margin: 0 0 16px; font-size: 1.2rem; }
-    input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #0d141e; color: var(--text); font-family: monospace; margin-bottom: 12px; }
-    button { width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #051321; font-weight: 700; cursor: pointer; }
-    .err { color: var(--bad); font-size: .9rem; margin-bottom: 12px; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>PlexTunnel Client UI</h1>
-    {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
-    <form method="post" action="/login">
-      <input type="password" name="token" placeholder="UI Token" required autofocus>
-      <button type="submit">Login</button>
-    </form>
-  </div>
-</body>
-</html>`
-
-var loginPageTmpl = template.Must(template.New("login").Parse(loginPageHTML))
-
-// tokenAuthMiddleware wraps a handler and requires a valid UI token.
-func tokenAuthMiddleware(token string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow login endpoint through.
-		if r.URL.Path == "/login" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// Check Authorization header (for API clients).
-		if auth := r.Header.Get("Authorization"); auth != "" {
-			if strings.HasPrefix(auth, "Bearer ") {
-				provided := strings.TrimPrefix(auth, "Bearer ")
-				if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1 {
-					next.ServeHTTP(w, r)
-					return
-				}
-			}
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		// Check cookie (for browser).
-		if cookie, err := r.Cookie("ui_token"); err == nil {
-			if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) == 1 {
-				next.ServeHTTP(w, r)
-				return
-			}
-		}
-
-		// No valid auth — show login page.
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = loginPageTmpl.Execute(w, struct{ Error string }{})
-	})
+	Status      client.ConnectionStatus
+	Config      client.Config
+	TokenMasked string
+	Message     string
+	Error       string
 }
 
 var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap{
@@ -246,37 +140,55 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="refresh" content="5">
-  <title>PlexTunnel Client UI</title>
+  <title>Portless Client</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%231a1a2e'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='central' text-anchor='middle' font-family='system-ui,sans-serif' font-weight='700' font-size='22' fill='%23D97706'%3EP%3C/text%3E%3C/svg%3E">
   <style>
     :root {
-      --bg: #0b0f14;
-      --bg-soft: #141b23;
-      --card: #101722;
-      --border: #2a3648;
-      --text: #e7edf5;
-      --muted: #9fb0c4;
-      --ok: #12b886;
-      --bad: #e03131;
-      --accent: #4dabf7;
+      --bg: #FFFBF5;
+      --card: #fff;
+      --surface: #FFF7ED;
+      --border: #E5DDD3;
+      --text: #1a1a1a;
+      --muted: #6B5E50;
+      --accent: #D97706;
+      --accent-hover: #B45309;
+      --ok-bg: #f0fdf4;
+      --ok-border: #b2f2bb;
+      --ok-text: #2b8a3e;
+      --bad-bg: #fff5f5;
+      --bad-border: #ffc9c9;
+      --bad-text: #c92a2a;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      font-family: system-ui, -apple-system, sans-serif;
       color: var(--text);
-      background: radial-gradient(circle at 10% 20%, #1a2330, var(--bg) 45%);
+      background: var(--bg);
       min-height: 100vh;
     }
     .wrap { max-width: 960px; margin: 24px auto; padding: 0 16px; }
     .panel {
-      background: linear-gradient(180deg, var(--card), var(--bg-soft));
+      background: var(--card);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 18px;
       margin-bottom: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
     }
-    h1 { margin: 0 0 8px; font-size: 1.4rem; }
-    h2 { margin: 0 0 12px; font-size: 1.05rem; color: var(--muted); }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.4rem;
+      text-align: center;
+    }
+    h2 {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
     .section-title {
       display: inline-flex;
       align-items: center;
@@ -291,7 +203,8 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       height: 18px;
       border-radius: 50%;
       border: 1px solid var(--border);
-      color: var(--accent);
+      background: var(--card);
+      color: var(--muted);
       font-size: 12px;
       font-weight: 700;
       cursor: help;
@@ -309,8 +222,8 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       padding: 8px 10px;
       border-radius: 8px;
       border: 1px solid var(--border);
-      background: #0d141e;
-      color: var(--text);
+      background: var(--card);
+      color: var(--muted);
       font-size: 12px;
       line-height: 1.35;
       white-space: normal;
@@ -319,6 +232,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       pointer-events: none;
       transition: opacity .12s ease-in-out;
       z-index: 20;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
     }
     .info-bubble:hover::before,
     .info-bubble:focus::before {
@@ -328,13 +242,20 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     .item { flex: 1 1 220px; }
     .label {
       color: var(--muted);
-      font-size: .85rem;
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
       display: inline-flex;
       align-items: center;
       gap: 6px;
       margin-bottom: 4px;
     }
-    .value { font-family: "IBM Plex Mono", Menlo, monospace; font-size: .95rem; word-break: break-word; }
+    .value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .95rem;
+      word-break: break-word;
+    }
     .badge {
       display: inline-block;
       border-radius: 999px;
@@ -343,18 +264,18 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       font-weight: 700;
       border: 1px solid var(--border);
     }
-    .ok { background: rgba(18,184,134,.15); color: #7ef0cb; border-color: rgba(18,184,134,.45); }
-    .bad { background: rgba(224,49,49,.15); color: #ffb1b1; border-color: rgba(224,49,49,.45); }
+    .ok { background: var(--ok-bg); color: var(--ok-text); border-color: var(--ok-border); }
+    .bad { background: var(--bad-bg); color: var(--bad-text); border-color: var(--bad-border); }
     form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .full { grid-column: 1 / -1; }
     input {
       width: 100%;
-      background: #0d141e;
+      background: var(--surface);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px 12px;
-      font-family: "IBM Plex Mono", Menlo, monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     button {
       border: 0;
@@ -362,11 +283,13 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       padding: 10px 14px;
       cursor: pointer;
       background: var(--accent);
-      color: #051321;
+      color: var(--text);
       font-weight: 700;
+      transition: background-color .12s ease-in-out;
     }
-    .msg { margin-top: 10px; font-size: .9rem; color: #94e2ff; }
-    .err { margin-top: 10px; font-size: .9rem; color: #ffb1b1; }
+    button:hover { background: var(--accent-hover); }
+    .msg { margin-top: 10px; font-size: .9rem; color: var(--ok-text); }
+    .err { margin-top: 10px; font-size: .9rem; color: var(--bad-text); }
     @media (max-width: 700px) {
       form { grid-template-columns: 1fr; }
     }
@@ -375,7 +298,13 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 <body>
   <div class="wrap">
     <div class="panel">
-      <h1>PlexTunnel Client</h1>
+      <div style="text-align:center;margin-bottom:0.75rem;">
+        <svg width="48" height="48" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" aria-label="Portless">
+          <rect width="36" height="36" rx="8" fill="#1a1a2e"/>
+          <text x="50%" y="54%" dominant-baseline="central" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="700" font-size="22" fill="#D97706">P</text>
+        </svg>
+      </div>
+      <h1>Portless Client</h1>
       <h2 class="section-title">
         Connection Status
         <span class="info-bubble" tabindex="0" data-tip="Shows live tunnel state. This page auto-refreshes every 5 seconds.">i</span>
@@ -444,7 +373,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
         </div>
         <div class="full">
           <span class="label">Server Token <span class="info-bubble" tabindex="0" data-tip="Authentication token from server tokens.json. Keep this secret.">i</span></span>
-          <input type="password" name="token" value="{{.Config.Token}}" required>
+          <input type="password" name="token" value="{{.TokenMasked}}" required>
         </div>
         <div>
           <span class="label">Plex Target <span class="info-bubble" tabindex="0" data-tip="Local Plex URL this client forwards requests to (for host network: http://127.0.0.1:32400).">i</span></span>
@@ -466,26 +395,37 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     </div>
   </div>
+  <div style="text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
+    A <a href="https://crbl.io" style="color:var(--accent);text-decoration:none;font-weight:600;">CRBL Technologies</a> product
+  </div>
 </body>
 </html>`))
 
-func newUIHandler(controller *clientController, logger zerolog.Logger, uiToken string) http.Handler {
+func newUIHandler(controller *clientController, logger zerolog.Logger, password string) http.Handler {
 	h := &uiHandler{
 		controller: controller,
 		logger:     logger,
-		uiToken:    uiToken,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/settings", h.handleSettings)
 	mux.HandleFunc("/api/status", h.handleStatus)
-	mux.HandleFunc("/login", h.handleLogin)
 
-	if uiToken != "" {
-		return tokenAuthMiddleware(uiToken, mux)
+	if password == "" {
+		return mux
 	}
-	return mux
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, providedPassword, ok := r.BasicAuth()
+		if !ok || username != "admin" || subtle.ConstantTimeCompare([]byte(providedPassword), []byte(password)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Portless Client"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -495,11 +435,16 @@ func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg, status := h.controller.Snapshot()
+	masked := tokenPlaceholder
+	if cfg.Token == "" {
+		masked = ""
+	}
 	data := statusPageData{
-		Status:  status,
-		Config:  cfg,
-		Message: strings.TrimSpace(r.URL.Query().Get("message")),
-		Error:   strings.TrimSpace(r.URL.Query().Get("error")),
+		Status:      status,
+		Config:      cfg,
+		TokenMasked: masked,
+		Message:     strings.TrimSpace(r.URL.Query().Get("message")),
+		Error:       strings.TrimSpace(r.URL.Query().Get("error")),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -514,13 +459,43 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	allowed := "http://" + host
+	allowedS := "https://" + host
+	if origin := r.Header.Get("Origin"); origin != "" {
+		if origin != allowed && origin != allowedS {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	} else if referer := r.Header.Get("Referer"); referer != "" {
+		parsed, err := url.Parse(referer)
+		if err != nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		refererOrigin := parsed.Scheme + "://" + parsed.Host
+		if refererOrigin != allowed && refererOrigin != allowedS {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	} else {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		redirectWithMessage(w, r, "", "failed to parse form")
 		return
 	}
 
 	cfg, _ := h.controller.Snapshot()
-	cfg.Token = strings.TrimSpace(r.FormValue("token"))
+	submittedToken := strings.TrimSpace(r.FormValue("token"))
+	if submittedToken != "" && submittedToken != tokenPlaceholder {
+		cfg.Token = submittedToken
+	}
 	cfg.ServerURL = strings.TrimSpace(r.FormValue("server_url"))
 	cfg.Subdomain = strings.TrimSpace(r.FormValue("subdomain"))
 	cfg.PlexTarget = strings.TrimSpace(r.FormValue("plex_target"))
@@ -540,6 +515,10 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.ServerURL == "" {
 		redirectWithMessage(w, r, "", "server URL is required")
+		return
+	}
+	if parsed, err := url.Parse(cfg.PlexTarget); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		redirectWithMessage(w, r, "", "plex target must be a valid http:// or https:// URL")
 		return
 	}
 	if parsed, err := url.Parse(cfg.ServerURL); err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
@@ -595,38 +574,6 @@ func (h *uiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func (h *uiHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-
-	if err := r.ParseForm(); err != nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = loginPageTmpl.Execute(w, struct{ Error string }{"Failed to parse form."})
-		return
-	}
-
-	provided := strings.TrimSpace(r.FormValue("token"))
-	if subtle.ConstantTimeCompare([]byte(provided), []byte(h.uiToken)) != 1 {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = loginPageTmpl.Execute(w, struct{ Error string }{"Invalid token."})
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "ui_token",
-		Value:    h.uiToken,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400 * 30, // 30 days
-	})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func redirectWithMessage(w http.ResponseWriter, r *http.Request, message string, errMessage string) {
