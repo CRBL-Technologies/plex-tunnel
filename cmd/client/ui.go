@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"html/template"
 	"net/http"
@@ -400,7 +401,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 </body>
 </html>`))
 
-func newUIHandler(controller *clientController, logger zerolog.Logger) http.Handler {
+func newUIHandler(controller *clientController, logger zerolog.Logger, password string) http.Handler {
 	h := &uiHandler{
 		controller: controller,
 		logger:     logger,
@@ -410,7 +411,21 @@ func newUIHandler(controller *clientController, logger zerolog.Logger) http.Hand
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/settings", h.handleSettings)
 	mux.HandleFunc("/api/status", h.handleStatus)
-	return mux
+
+	if password == "" {
+		return mux
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, providedPassword, ok := r.BasicAuth()
+		if !ok || username != "admin" || subtle.ConstantTimeCompare([]byte(providedPassword), []byte(password)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Portless Client"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -444,17 +459,31 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	allowed := "http://" + host
+	allowedS := "https://" + host
 	if origin := r.Header.Get("Origin"); origin != "" {
-		host := r.Host
-		if host == "" {
-			host = r.URL.Host
-		}
-		allowed := "http://" + host
-		allowedS := "https://" + host
 		if origin != allowed && origin != allowedS {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+	} else if referer := r.Header.Get("Referer"); referer != "" {
+		parsed, err := url.Parse(referer)
+		if err != nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		refererOrigin := parsed.Scheme + "://" + parsed.Host
+		if refererOrigin != allowed && refererOrigin != allowedS {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	} else {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
 	}
 
 	if err := r.ParseForm(); err != nil {
@@ -486,6 +515,10 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.ServerURL == "" {
 		redirectWithMessage(w, r, "", "server URL is required")
+		return
+	}
+	if parsed, err := url.Parse(cfg.PlexTarget); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		redirectWithMessage(w, r, "", "plex target must be a valid http:// or https:// URL")
 		return
 	}
 	if parsed, err := url.Parse(cfg.ServerURL); err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
