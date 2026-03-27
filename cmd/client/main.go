@@ -42,8 +42,12 @@ func main() {
 	uiListen := getenvDefault("PLEXTUNNEL_UI_LISTEN", "127.0.0.1:9090")
 	if uiListen != "" {
 		srv := &http.Server{
-			Addr:    uiListen,
-			Handler: newUIHandler(controller, logger),
+			Addr:              uiListen,
+			Handler:           newUIHandler(controller, logger),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
 		}
 
 		go func() {

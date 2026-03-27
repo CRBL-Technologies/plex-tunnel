@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -43,6 +44,9 @@ func LoadConfig() (Config, error) {
 	if cfg.ServerURL == "" {
 		return Config{}, fmt.Errorf("PLEXTUNNEL_SERVER_URL is required")
 	}
+	if parsed, err := url.Parse(cfg.ServerURL); err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
+		return Config{}, fmt.Errorf("PLEXTUNNEL_SERVER_URL must be a ws:// or wss:// URL")
+	}
 
 	if raw := strings.TrimSpace(os.Getenv("PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
@@ -81,8 +85,8 @@ func LoadConfig() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("invalid PLEXTUNNEL_MAX_CONNECTIONS: %w", err)
 		}
-		if maxConnections < 1 {
-			return Config{}, fmt.Errorf("PLEXTUNNEL_MAX_CONNECTIONS must be >= 1")
+		if maxConnections < 1 || maxConnections > 32 {
+			return Config{}, fmt.Errorf("PLEXTUNNEL_MAX_CONNECTIONS must be between 1 and 32")
 		}
 		cfg.MaxConnections = maxConnections
 	}
@@ -92,8 +96,8 @@ func LoadConfig() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("invalid PLEXTUNNEL_RESPONSE_CHUNK_SIZE: %w", err)
 		}
-		if chunkSize < 1024 {
-			return Config{}, fmt.Errorf("PLEXTUNNEL_RESPONSE_CHUNK_SIZE must be >= 1024")
+		if chunkSize < 1024 || chunkSize > 4*1024*1024 {
+			return Config{}, fmt.Errorf("PLEXTUNNEL_RESPONSE_CHUNK_SIZE must be between 1024 and 4194304")
 		}
 		cfg.ResponseChunkSize = chunkSize
 	}
