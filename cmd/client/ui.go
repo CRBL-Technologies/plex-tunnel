@@ -16,6 +16,8 @@ import (
 	"github.com/CRBL-Technologies/plex-tunnel/pkg/client"
 )
 
+const tokenPlaceholder = "\x00unchanged\x00"
+
 type clientController struct {
 	rootCtx context.Context
 	logger  zerolog.Logger
@@ -117,10 +119,11 @@ type uiHandler struct {
 }
 
 type statusPageData struct {
-	Status  client.ConnectionStatus
-	Config  client.Config
-	Message string
-	Error   string
+	Status      client.ConnectionStatus
+	Config      client.Config
+	TokenMasked string
+	Message     string
+	Error       string
 }
 
 var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap{
@@ -370,7 +373,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
         </div>
         <div class="full">
           <span class="label">Server Token <span class="info-bubble" tabindex="0" data-tip="Authentication token from server tokens.json. Keep this secret.">i</span></span>
-          <input type="password" name="token" value="{{.Config.Token}}" required>
+          <input type="password" name="token" value="{{.TokenMasked}}" required>
         </div>
         <div>
           <span class="label">Plex Target <span class="info-bubble" tabindex="0" data-tip="Local Plex URL this client forwards requests to (for host network: http://127.0.0.1:32400).">i</span></span>
@@ -415,11 +418,16 @@ func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg, status := h.controller.Snapshot()
+	masked := tokenPlaceholder
+	if cfg.Token == "" {
+		masked = ""
+	}
 	data := statusPageData{
-		Status:  status,
-		Config:  cfg,
-		Message: strings.TrimSpace(r.URL.Query().Get("message")),
-		Error:   strings.TrimSpace(r.URL.Query().Get("error")),
+		Status:      status,
+		Config:      cfg,
+		TokenMasked: masked,
+		Message:     strings.TrimSpace(r.URL.Query().Get("message")),
+		Error:       strings.TrimSpace(r.URL.Query().Get("error")),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -434,13 +442,29 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if origin := r.Header.Get("Origin"); origin != "" {
+		host := r.Host
+		if host == "" {
+			host = r.URL.Host
+		}
+		allowed := "http://" + host
+		allowedS := "https://" + host
+		if origin != allowed && origin != allowedS {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
 	if err := r.ParseForm(); err != nil {
 		redirectWithMessage(w, r, "", "failed to parse form")
 		return
 	}
 
 	cfg, _ := h.controller.Snapshot()
-	cfg.Token = strings.TrimSpace(r.FormValue("token"))
+	submittedToken := strings.TrimSpace(r.FormValue("token"))
+	if submittedToken != "" && submittedToken != tokenPlaceholder {
+		cfg.Token = submittedToken
+	}
 	cfg.ServerURL = strings.TrimSpace(r.FormValue("server_url"))
 	cfg.Subdomain = strings.TrimSpace(r.FormValue("subdomain"))
 	cfg.PlexTarget = strings.TrimSpace(r.FormValue("plex_target"))

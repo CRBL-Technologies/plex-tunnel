@@ -17,13 +17,20 @@ import (
 	"github.com/CRBL-Technologies/plex-tunnel-proto/tunnel"
 )
 
+const (
+	maxConcurrentStreams = 128
+	maxPoolConnections  = 32
+	proxyRequestTimeout = 5 * time.Minute
+)
+
 type Client struct {
 	cfg    Config
 	logger zerolog.Logger
 	client *http.Client
 
-	stateMu sync.RWMutex
-	state   ConnectionStatus
+	streamSem chan struct{}
+	stateMu   sync.RWMutex
+	state     ConnectionStatus
 }
 
 type sessionPoolController struct {
@@ -104,6 +111,7 @@ func New(cfg Config, logger zerolog.Logger) *Client {
 				ResponseHeaderTimeout: 30 * time.Second,
 			},
 		},
+		streamSem: make(chan struct{}, maxConcurrentStreams),
 	}
 }
 
@@ -195,7 +203,11 @@ func (c *Client) runSession(ctx context.Context) error {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	pool := newConnectionPool(controlConn.RemoteAddr(), registerAck.Subdomain, registerAck.SessionID, registerAck.MaxConnections)
+	grantedMax := registerAck.MaxConnections
+	if grantedMax > maxPoolConnections {
+		grantedMax = maxPoolConnections
+	}
+	pool := newConnectionPool(controlConn.RemoteAddr(), registerAck.Subdomain, registerAck.SessionID, grantedMax)
 	defer pool.close()
 
 	c.updateStatus(func(s *ConnectionStatus) {
@@ -243,11 +255,21 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 
 		switch msg.Type {
 		case tunnel.MsgHTTPRequest:
+			select {
+			case c.streamSem <- struct{}{}:
+			default:
+				c.logger.Warn().Str("request_id", msg.ID).Msg("concurrent stream limit reached, rejecting request")
+				_ = c.sendProxyError(connRef.conn, msg.ID, http.StatusServiceUnavailable, "client overloaded")
+				continue
+			}
 			go func(request tunnel.Message) {
+				defer func() { <-c.streamSem }()
 				connRef.streams.Add(1)
 				defer connRef.streams.Add(-1)
 
-				if err := c.handleHTTPRequest(ctx, connRef, request); err != nil {
+				reqCtx, reqCancel := context.WithTimeout(ctx, proxyRequestTimeout)
+				defer reqCancel()
+				if err := c.handleHTTPRequest(reqCtx, connRef, request); err != nil {
 					c.logger.Warn().Err(err).Str("request_id", request.ID).Msg("failed to process proxied request")
 				}
 			}(msg)
@@ -274,7 +296,11 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 				Int("connection_index", connRef.index).
 				Msg("received register ack")
 		case tunnel.MsgMaxConnectionsUpdate:
-			session.resize(msg.MaxConnections)
+			capped := msg.MaxConnections
+			if capped > maxPoolConnections {
+				capped = maxPoolConnections
+			}
+			session.resize(capped)
 		case tunnel.MsgWSOpen, tunnel.MsgWSFrame, tunnel.MsgWSClose, tunnel.MsgKeyExchange:
 			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported websocket message type")
 		default:

@@ -3,13 +3,21 @@ package client
 import (
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 )
 
 const maxReconnectJitter = 500 * time.Millisecond
 
+var (
+	backoffMu  sync.Mutex
+	backoffRng = rand.New(rand.NewSource(time.Now().UnixNano()))
+)
+
 func BackoffDelay(attempt int, maxDelay time.Duration) time.Duration {
-	return backoffDelayWithRand(attempt, maxDelay, rand.New(rand.NewSource(time.Now().UnixNano())))
+	backoffMu.Lock()
+	defer backoffMu.Unlock()
+	return backoffDelayWithRand(attempt, maxDelay, backoffRng)
 }
 
 func backoffDelayWithRand(attempt int, maxDelay time.Duration, rng *rand.Rand) time.Duration {
