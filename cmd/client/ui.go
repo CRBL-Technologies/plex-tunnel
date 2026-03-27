@@ -136,37 +136,54 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="refresh" content="5">
-  <title>PlexTunnel Client UI</title>
+  <title>Portless Client</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='none' stroke='%231D9E75' stroke-width='3.5'/%3E%3Ccircle cx='32' cy='32' r='21' fill='%230F6E56' opacity='0.12'/%3E%3Cpath d='M25 19 L44 32 L25 45 Z' fill='%231D9E75'/%3E%3C/svg%3E">
   <style>
     :root {
-      --bg: #0b0f14;
-      --bg-soft: #141b23;
-      --card: #101722;
-      --border: #2a3648;
-      --text: #e7edf5;
-      --muted: #9fb0c4;
-      --ok: #12b886;
-      --bad: #e03131;
-      --accent: #4dabf7;
+      --bg: #f8f9fa;
+      --card: #fff;
+      --border: #dee2e6;
+      --text: #1a1a1a;
+      --muted: #495057;
+      --accent: #e5a00d;
+      --accent-hover: #c98a0b;
+      --ok-bg: #f0fdf4;
+      --ok-border: #b2f2bb;
+      --ok-text: #2b8a3e;
+      --bad-bg: #fff5f5;
+      --bad-border: #ffc9c9;
+      --bad-text: #c92a2a;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      font-family: system-ui, -apple-system, sans-serif;
       color: var(--text);
-      background: radial-gradient(circle at 10% 20%, #1a2330, var(--bg) 45%);
+      background: var(--bg);
       min-height: 100vh;
     }
     .wrap { max-width: 960px; margin: 24px auto; padding: 0 16px; }
     .panel {
-      background: linear-gradient(180deg, var(--card), var(--bg-soft));
+      background: var(--card);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 18px;
       margin-bottom: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
     }
-    h1 { margin: 0 0 8px; font-size: 1.4rem; }
-    h2 { margin: 0 0 12px; font-size: 1.05rem; color: var(--muted); }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.4rem;
+      text-align: center;
+    }
+    h2 {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
     .section-title {
       display: inline-flex;
       align-items: center;
@@ -181,7 +198,8 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       height: 18px;
       border-radius: 50%;
       border: 1px solid var(--border);
-      color: var(--accent);
+      background: var(--card);
+      color: var(--muted);
       font-size: 12px;
       font-weight: 700;
       cursor: help;
@@ -199,8 +217,8 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       padding: 8px 10px;
       border-radius: 8px;
       border: 1px solid var(--border);
-      background: #0d141e;
-      color: var(--text);
+      background: var(--card);
+      color: var(--muted);
       font-size: 12px;
       line-height: 1.35;
       white-space: normal;
@@ -209,6 +227,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       pointer-events: none;
       transition: opacity .12s ease-in-out;
       z-index: 20;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
     }
     .info-bubble:hover::before,
     .info-bubble:focus::before {
@@ -218,13 +237,20 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     .item { flex: 1 1 220px; }
     .label {
       color: var(--muted);
-      font-size: .85rem;
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
       display: inline-flex;
       align-items: center;
       gap: 6px;
       margin-bottom: 4px;
     }
-    .value { font-family: "IBM Plex Mono", Menlo, monospace; font-size: .95rem; word-break: break-word; }
+    .value {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .95rem;
+      word-break: break-word;
+    }
     .badge {
       display: inline-block;
       border-radius: 999px;
@@ -233,18 +259,18 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       font-weight: 700;
       border: 1px solid var(--border);
     }
-    .ok { background: rgba(18,184,134,.15); color: #7ef0cb; border-color: rgba(18,184,134,.45); }
-    .bad { background: rgba(224,49,49,.15); color: #ffb1b1; border-color: rgba(224,49,49,.45); }
+    .ok { background: var(--ok-bg); color: var(--ok-text); border-color: var(--ok-border); }
+    .bad { background: var(--bad-bg); color: var(--bad-text); border-color: var(--bad-border); }
     form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .full { grid-column: 1 / -1; }
     input {
       width: 100%;
-      background: #0d141e;
+      background: var(--bg);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px 12px;
-      font-family: "IBM Plex Mono", Menlo, monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     button {
       border: 0;
@@ -252,11 +278,13 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       padding: 10px 14px;
       cursor: pointer;
       background: var(--accent);
-      color: #051321;
+      color: var(--text);
       font-weight: 700;
+      transition: background-color .12s ease-in-out;
     }
-    .msg { margin-top: 10px; font-size: .9rem; color: #94e2ff; }
-    .err { margin-top: 10px; font-size: .9rem; color: #ffb1b1; }
+    button:hover { background: var(--accent-hover); }
+    .msg { margin-top: 10px; font-size: .9rem; color: var(--ok-text); }
+    .err { margin-top: 10px; font-size: .9rem; color: var(--bad-text); }
     @media (max-width: 700px) {
       form { grid-template-columns: 1fr; }
     }
@@ -265,7 +293,15 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 <body>
   <div class="wrap">
     <div class="panel">
-      <h1>PlexTunnel Client</h1>
+      <div style="text-align:center;margin-bottom:0.75rem;">
+        <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="Portless">
+          <circle cx="32" cy="32" r="28" fill="none" stroke="#1D9E75" stroke-width="3.5"/>
+          <circle cx="32" cy="32" r="21" fill="#0F6E56" opacity="0.12"/>
+          <circle cx="32" cy="32" r="15" fill="none" stroke="#1D9E75" stroke-width="1" opacity="0.2"/>
+          <path d="M25 19 L44 32 L25 45 Z" fill="#1D9E75"/>
+        </svg>
+      </div>
+      <h1>Portless Client</h1>
       <h2 class="section-title">
         Connection Status
         <span class="info-bubble" tabindex="0" data-tip="Shows live tunnel state. This page auto-refreshes every 5 seconds.">i</span>
