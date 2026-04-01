@@ -79,6 +79,16 @@ func (p *ConnectionPool) add(index int, conn *tunnel.WebSocketConnection) (*pool
 	return connRef, index == p.controlIndex
 }
 
+func (p *ConnectionPool) setConnPingCancel(index int, cancel context.CancelFunc) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if index < 0 || index >= len(p.conns) || p.conns[index] == nil {
+		return
+	}
+	p.conns[index].pingCancel = cancel
+}
+
 func (p *ConnectionPool) setSlotCancel(index int, cancel context.CancelFunc) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

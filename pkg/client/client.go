@@ -582,7 +582,7 @@ func (c *Client) maintainPoolSlot(
 		if isControl {
 			c.startPoolPingLoop(session.ctx, pool, connRef)
 		} else {
-			c.startConnPingLoop(ctx, connRef)
+			c.startConnPingLoop(ctx, pool, connRef)
 		}
 
 		c.logger.Info().
@@ -650,9 +650,9 @@ func (c *Client) startPoolPingLoop(ctx context.Context, pool *ConnectionPool, co
 	}()
 }
 
-func (c *Client) startConnPingLoop(ctx context.Context, connRef *poolConn) {
+func (c *Client) startConnPingLoop(ctx context.Context, pool *ConnectionPool, connRef *poolConn) {
 	pingCtx, cancel := context.WithCancel(ctx)
-	connRef.pingCancel = cancel
+	pool.setConnPingCancel(connRef.index, cancel)
 	connRef.lastPong.Store(time.Now().UnixNano())
 
 	go func() {
