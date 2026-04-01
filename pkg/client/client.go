@@ -208,6 +208,7 @@ func (c *Client) runSession(ctx context.Context) error {
 	if grantedMax > maxPoolConnections {
 		grantedMax = maxPoolConnections
 	}
+	c.cfg.MaxConnections = grantedMax
 	pool := newConnectionPool(controlConn.RemoteAddr(), registerAck.Subdomain, registerAck.SessionID, grantedMax)
 	defer pool.close()
 
