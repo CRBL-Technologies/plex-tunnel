@@ -148,7 +148,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Portless Client</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%231C1917'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='central' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-weight='600' font-size='22' fill='%23D97706'%3EP%3C/text%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%231C1917'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-weight='600' font-size='22' fill='%23D97706'%3EP%3C/text%3E%3C/svg%3E">
   <style>
     :root {
       --bg: #FFFBF5;
@@ -309,10 +309,14 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       <div style="text-align:center;margin-bottom:0.75rem;">
         <svg width="48" height="48" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" aria-label="Portless">
           <rect width="36" height="36" rx="8" fill="#1C1917"/>
-          <text x="50%" y="54%" dominant-baseline="central" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="22" fill="#D97706">P</text>
+          <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="22" fill="#D97706">P</text>
         </svg>
       </div>
-      <h1>Portless Client</h1>
+      <h1 style="text-align:center;margin:0 0 8px;">
+        <svg width="210" height="28" viewBox="0 0 420 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <text x="0" y="40" font-family="'Inter', system-ui, -apple-system, sans-serif" font-weight="600" font-size="40" letter-spacing="-0.5"><tspan fill="#D97706">P</tspan><tspan fill="#1C1917">ortless Client</tspan></text>
+        </svg>
+      </h1>
       <h2 class="section-title">
         Connection Status
         <span class="info-bubble" tabindex="0" data-tip="Shows live tunnel state. Status updates every 5 seconds.">i</span>
