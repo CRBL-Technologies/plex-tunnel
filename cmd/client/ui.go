@@ -17,7 +17,15 @@ import (
 	"github.com/CRBL-Technologies/plex-tunnel/pkg/client"
 )
 
-const tokenPlaceholder = "\x00unchanged\x00"
+// maskToken returns a masked version of a token for safe display.
+// Shows only the last 4 characters, e.g. "****abcd".
+func maskToken(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) <= 4 {
+		return "****"
+	}
+	return "****" + token[len(token)-4:]
+}
 
 type clientController struct {
 	rootCtx context.Context
@@ -373,7 +381,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
         </div>
         <div class="full">
           <span class="label">Server Token <span class="info-bubble" tabindex="0" data-tip="Authentication token from server tokens.json. Keep this secret.">i</span></span>
-          <input type="password" name="token" value="{{.TokenMasked}}" required>
+          <input name="token" value="{{.TokenMasked}}" required>
         </div>
         <div>
           <span class="label">Plex Target <span class="info-bubble" tabindex="0" data-tip="Local Plex URL this client forwards requests to (for host network: http://127.0.0.1:32400).">i</span></span>
@@ -435,9 +443,9 @@ func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg, status := h.controller.Snapshot()
-	masked := tokenPlaceholder
-	if cfg.Token == "" {
-		masked = ""
+	masked := ""
+	if cfg.Token != "" {
+		masked = maskToken(cfg.Token)
 	}
 	data := statusPageData{
 		Status:      status,
@@ -493,7 +501,7 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	cfg, _ := h.controller.Snapshot()
 	submittedToken := strings.TrimSpace(r.FormValue("token"))
-	if submittedToken != "" && submittedToken != tokenPlaceholder {
+	if submittedToken != "" && submittedToken != maskToken(cfg.Token) {
 		cfg.Token = submittedToken
 	}
 	cfg.ServerURL = strings.TrimSpace(r.FormValue("server_url"))
