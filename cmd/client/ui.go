@@ -267,7 +267,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     .ok { background: var(--ok-bg); color: var(--ok-text); border-color: var(--ok-border); }
     .bad { background: var(--bad-bg); color: var(--bad-text); border-color: var(--bad-border); }
     form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .full { grid-column: 1 / -1; }
+    .full { grid-column: 1 / -1; flex: 1 1 100%; }
     input {
       width: 100%;
       background: var(--surface);
