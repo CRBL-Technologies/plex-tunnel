@@ -275,7 +275,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     .bad { background: var(--bad-bg); color: var(--bad-text); border-color: var(--bad-border); }
     form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .full { grid-column: 1 / -1; }
-    input {
+    input, select {
       width: 100%;
       background: var(--surface);
       color: var(--text);
@@ -283,6 +283,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       border-radius: 8px;
       padding: 10px 12px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      box-sizing: border-box;
     }
     button {
       border: 0;
@@ -376,7 +377,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
         </div>
         <div>
           <span class="label">Subdomain <span class="info-bubble" tabindex="0" data-tip="Requested client subdomain. Must match token rules on server.">i</span></span>
-          <input name="subdomain" value="{{.Config.Subdomain}}">
+          <input name="subdomain" value="{{if .Config.Subdomain}}{{.Config.Subdomain}}{{else}}{{.Status.Subdomain}}{{end}}">
         </div>
         <div class="full">
           <span class="label">Server Token <span class="info-bubble" tabindex="0" data-tip="Authentication token from server tokens.json. Keep this secret.">i</span></span>
@@ -388,7 +389,12 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
         </div>
         <div>
           <span class="label">Log Level <span class="info-bubble" tabindex="0" data-tip="Logging verbosity: debug, info, warn, error.">i</span></span>
-          <input name="log_level" value="{{.Config.LogLevel}}">
+          <select name="log_level">
+            <option value="debug"{{if eq .Config.LogLevel "debug"}} selected{{end}}>debug</option>
+            <option value="info"{{if eq .Config.LogLevel "info"}} selected{{end}}>info</option>
+            <option value="warn"{{if eq .Config.LogLevel "warn"}} selected{{end}}>warn</option>
+            <option value="error"{{if eq .Config.LogLevel "error"}} selected{{end}}>error</option>
+          </select>
         </div>
         <div>
           <span class="label">Max Connections <span class="info-bubble" tabindex="0" data-tip="Requested parallel websocket pool size for protocol v2 sessions. The server may grant a lower value.">i</span></span>
