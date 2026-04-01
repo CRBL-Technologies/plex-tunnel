@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,8 +20,8 @@ import (
 
 const (
 	maxConcurrentStreams = 128
-	maxPoolConnections  = 32
-	proxyRequestTimeout = 5 * time.Minute
+	maxPoolConnections   = 32
+	proxyRequestTimeout  = 5 * time.Minute
 )
 
 type Client struct {
@@ -250,6 +251,14 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 	for {
 		msg, err := connRef.conn.Receive()
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && connRef.streams.Load() == 0 && ctx.Err() == nil {
+				c.logger.Debug().
+					Err(err).
+					Str("session_id", session.pool.sessionID).
+					Int("connection_index", connRef.index).
+					Msg("retrying idle tunnel connection after read timeout")
+				continue
+			}
 			return fmt.Errorf("read loop: %w", err)
 		}
 
@@ -572,6 +581,8 @@ func (c *Client) maintainPoolSlot(
 
 		if isControl {
 			c.startPoolPingLoop(session.ctx, pool, connRef)
+		} else {
+			c.startConnPingLoop(ctx, connRef)
 		}
 
 		c.logger.Info().
@@ -634,6 +645,22 @@ func (c *Client) startPoolPingLoop(ctx context.Context, pool *ConnectionPool, co
 				Str("session_id", pool.sessionID).
 				Int("connection_index", connRef.index).
 				Msg("control connection ping loop failed")
+			_ = connRef.conn.Close()
+		}
+	}()
+}
+
+func (c *Client) startConnPingLoop(ctx context.Context, connRef *poolConn) {
+	pingCtx, cancel := context.WithCancel(ctx)
+	connRef.pingCancel = cancel
+	connRef.lastPong.Store(time.Now().UnixNano())
+
+	go func() {
+		if err := c.pingLoop(pingCtx, connRef.conn, &connRef.lastPong); err != nil && pingCtx.Err() == nil {
+			c.logger.Warn().
+				Err(err).
+				Int("connection_index", connRef.index).
+				Msg("connection ping loop failed")
 			_ = connRef.conn.Close()
 		}
 	}()
