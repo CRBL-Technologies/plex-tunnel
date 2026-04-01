@@ -28,10 +28,11 @@ type ConnectionPool struct {
 }
 
 type poolConn struct {
-	conn     *tunnel.WebSocketConnection
-	index    int
-	streams  atomic.Int64
-	lastPong atomic.Int64
+	conn       *tunnel.WebSocketConnection
+	index      int
+	streams    atomic.Int64
+	lastPong   atomic.Int64
+	pingCancel context.CancelFunc
 }
 
 type poolSnapshot struct {
@@ -96,8 +97,14 @@ func (p *ConnectionPool) remove(index int) (remaining int, promoted *poolConn, c
 		return p.activeCountLocked(), nil, false
 	}
 
+	removedConn := p.conns[index]
 	p.conns[index] = nil
 	controlLost = index == p.controlIndex
+
+	if removedConn.pingCancel != nil {
+		removedConn.pingCancel()
+		removedConn.pingCancel = nil
+	}
 
 	if controlLost && p.pingCancel != nil {
 		p.pingCancel()
@@ -124,7 +131,11 @@ func (p *ConnectionPool) remove(index int) (remaining int, promoted *poolConn, c
 		break
 	}
 	p.controlIndex = nextIndex
-	return remaining, p.conns[nextIndex], true
+	if promoted = p.conns[nextIndex]; promoted != nil && promoted.pingCancel != nil {
+		promoted.pingCancel()
+		promoted.pingCancel = nil
+	}
+	return remaining, promoted, true
 }
 
 func (p *ConnectionPool) replacePingLoop(cancel context.CancelFunc) {
@@ -193,6 +204,7 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 
 	removedConns := make([]*poolConn, 0, oldMax-newMax)
 	removedCancels := make([]context.CancelFunc, 0, oldMax-newMax)
+	removedPingCancels := make([]context.CancelFunc, 0, oldMax-newMax)
 	var pingCancel context.CancelFunc
 
 	if p.controlIndex >= newMax {
@@ -209,10 +221,18 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 		}
 		pingCancel = p.pingCancel
 		p.pingCancel = nil
+		if promoted != nil && promoted.pingCancel != nil {
+			removedPingCancels = append(removedPingCancels, promoted.pingCancel)
+			promoted.pingCancel = nil
+		}
 	}
 
 	for i := oldMax - 1; i >= newMax; i-- {
 		if p.conns[i] != nil {
+			if p.conns[i].pingCancel != nil {
+				removedPingCancels = append(removedPingCancels, p.conns[i].pingCancel)
+				p.conns[i].pingCancel = nil
+			}
 			removedConns = append(removedConns, p.conns[i])
 			p.conns[i] = nil
 		}
@@ -230,6 +250,9 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 	if pingCancel != nil {
 		pingCancel()
 	}
+	for _, cancel := range removedPingCancels {
+		cancel()
+	}
 	for _, cancel := range removedCancels {
 		cancel()
 	}
@@ -243,8 +266,13 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 func (p *ConnectionPool) close() {
 	p.mu.Lock()
 	conns := make([]*poolConn, 0, len(p.conns))
+	connPingCancels := make([]context.CancelFunc, 0, len(p.conns))
 	for _, connRef := range p.conns {
 		if connRef != nil {
+			if connRef.pingCancel != nil {
+				connPingCancels = append(connPingCancels, connRef.pingCancel)
+				connRef.pingCancel = nil
+			}
 			conns = append(conns, connRef)
 		}
 	}
@@ -259,6 +287,9 @@ func (p *ConnectionPool) close() {
 	p.mu.Unlock()
 
 	if cancel != nil {
+		cancel()
+	}
+	for _, cancel := range connPingCancels {
 		cancel()
 	}
 	for _, cancel := range slotCancels {
