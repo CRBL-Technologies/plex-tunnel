@@ -147,7 +147,6 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="refresh" content="5">
   <title>Portless Client</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Crect width='36' height='36' rx='8' fill='%231C1917'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='central' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-weight='600' font-size='22' fill='%23D97706'%3EP%3C/text%3E%3C/svg%3E">
   <style>
@@ -315,52 +314,52 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       <h1>Portless Client</h1>
       <h2 class="section-title">
         Connection Status
-        <span class="info-bubble" tabindex="0" data-tip="Shows live tunnel state. This page auto-refreshes every 5 seconds.">i</span>
+        <span class="info-bubble" tabindex="0" data-tip="Shows live tunnel state. Status updates every 5 seconds.">i</span>
       </h2>
       <div class="row">
         <div class="item">
           <span class="label">Status <span class="info-bubble" tabindex="0" data-tip="Current websocket/tunnel state between this client and the server.">i</span></span>
-          {{if .Status.Connected}}<span class="badge ok">CONNECTED</span>{{else}}<span class="badge bad">DISCONNECTED</span>{{end}}
+          <span id="s-connected">{{if .Status.Connected}}<span class="badge ok">CONNECTED</span>{{else}}<span class="badge bad">DISCONNECTED</span>{{end}}</span>
         </div>
         <div class="item">
           <span class="label">Server <span class="info-bubble" tabindex="0" data-tip="Remote tunnel server endpoint currently connected.">i</span></span>
-          <span class="value">{{.Status.Server}}</span>
+          <span class="value" id="s-server">{{.Status.Server}}</span>
         </div>
         <div class="item">
           <span class="label">Subdomain <span class="info-bubble" tabindex="0" data-tip="Assigned subdomain for incoming traffic routing.">i</span></span>
-          <span class="value">{{.Status.Subdomain}}</span>
+          <span class="value" id="s-subdomain">{{.Status.Subdomain}}</span>
         </div>
         <div class="item">
           <span class="label">Session ID <span class="info-bubble" tabindex="0" data-tip="Logical tunnel session identifier shared across all pooled websocket connections.">i</span></span>
-          <span class="value">{{if .Status.SessionID}}{{.Status.SessionID}}{{else}}-{{end}}</span>
+          <span class="value" id="s-session">{{if .Status.SessionID}}{{.Status.SessionID}}{{else}}-{{end}}</span>
         </div>
         <div class="item">
           <span class="label">Active Connections <span class="info-bubble" tabindex="0" data-tip="Currently connected websocket count in the active tunnel session.">i</span></span>
-          <span class="value">{{.Status.ActiveConnections}}</span>
+          <span class="value" id="s-active">{{.Status.ActiveConnections}}</span>
         </div>
         <div class="item">
           <span class="label">Pool Size <span class="info-bubble" tabindex="0" data-tip="Server-granted connection pool size for this session.">i</span></span>
-          <span class="value">{{.Status.MaxConnections}}</span>
+          <span class="value" id="s-pool">{{.Status.MaxConnections}}</span>
         </div>
         <div class="item">
           <span class="label">Control Connection <span class="info-bubble" tabindex="0" data-tip="Connection index currently responsible for ping/pong and control duties.">i</span></span>
-          <span class="value">{{.Status.ControlConnection}}</span>
+          <span class="value" id="s-control">{{.Status.ControlConnection}}</span>
         </div>
         <div class="item">
           <span class="label">Reconnect Attempt <span class="info-bubble" tabindex="0" data-tip="Number of current retry attempt after a disconnection.">i</span></span>
-          <span class="value">{{.Status.ReconnectAttempt}}</span>
+          <span class="value" id="s-reconnect">{{.Status.ReconnectAttempt}}</span>
         </div>
         <div class="item">
           <span class="label">Last Connected <span class="info-bubble" tabindex="0" data-tip="Timestamp of the last successful connection to server.">i</span></span>
-          <span class="value">{{formatTime .Status.LastConnectedAt}}</span>
+          <span class="value" id="s-last-conn">{{formatTime .Status.LastConnectedAt}}</span>
         </div>
         <div class="item">
           <span class="label">Last Disconnected <span class="info-bubble" tabindex="0" data-tip="Timestamp of the latest disconnect event.">i</span></span>
-          <span class="value">{{formatTime .Status.LastDisconnectedAt}}</span>
+          <span class="value" id="s-last-disc">{{formatTime .Status.LastDisconnectedAt}}</span>
         </div>
         <div class="item full">
           <span class="label">Last Error <span class="info-bubble" tabindex="0" data-tip="Most recent connection/proxy error reported by the client.">i</span></span>
-          <span class="value">{{if .Status.LastError}}{{.Status.LastError}}{{else}}-{{end}}</span>
+          <span class="value" id="s-error">{{if .Status.LastError}}{{.Status.LastError}}{{else}}-{{end}}</span>
         </div>
       </div>
     </div>
@@ -406,6 +405,26 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
   <div style="text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
     A <a href="https://crbl.io" style="color:var(--accent);text-decoration:none;font-weight:600;">CRBL Technologies</a> product
   </div>
+  <script>
+  function fmtTime(s){if(!s||s==="0001-01-01T00:00:00Z")return"-";var d=new Date(s);return d.toISOString().replace("T"," ").slice(0,19)}
+  function poll(){
+    fetch("/api/status").then(function(r){return r.json()}).then(function(d){
+      var s=d.status;
+      document.getElementById("s-connected").innerHTML=s.connected?'<span class="badge ok">CONNECTED</span>':'<span class="badge bad">DISCONNECTED</span>';
+      document.getElementById("s-server").textContent=s.server||"";
+      document.getElementById("s-subdomain").textContent=s.subdomain||"";
+      document.getElementById("s-session").textContent=s.session_id||"-";
+      document.getElementById("s-active").textContent=s.active_connections;
+      document.getElementById("s-pool").textContent=s.max_connections;
+      document.getElementById("s-control").textContent=s.control_connection;
+      document.getElementById("s-reconnect").textContent=s.reconnect_attempt;
+      document.getElementById("s-last-conn").textContent=fmtTime(s.last_connected_at);
+      document.getElementById("s-last-disc").textContent=fmtTime(s.last_disconnected_at);
+      document.getElementById("s-error").textContent=s.last_error||"-";
+    }).catch(function(){});
+  }
+  setInterval(poll,5000);
+  </script>
 </body>
 </html>`))
 
