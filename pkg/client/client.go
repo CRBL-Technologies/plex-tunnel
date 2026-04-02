@@ -258,6 +258,11 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 					Str("session_id", session.pool.sessionID).
 					Int("connection_index", connRef.index).
 					Msg("retrying idle tunnel connection after read timeout")
+				select {
+				case <-time.After(100 * time.Millisecond):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				continue
 			}
 			return fmt.Errorf("read loop: %w", err)

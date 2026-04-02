@@ -49,7 +49,7 @@ func main() {
 
 		srv := &http.Server{
 			Addr:              uiListen,
-			Handler:           newUIHandler(controller, logger, uiPassword),
+			Handler:           newUIHandler(controller, logger, uiPassword, uiListen),
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       15 * time.Second,
 			WriteTimeout:      30 * time.Second,

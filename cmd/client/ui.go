@@ -123,8 +123,10 @@ func (c *clientController) Snapshot() (client.Config, client.ConnectionStatus) {
 }
 
 type uiHandler struct {
-	controller *clientController
-	logger     zerolog.Logger
+	controller    *clientController
+	logger        zerolog.Logger
+	listenAddr    string
+	allowedOrigin string
 }
 
 type statusPageData struct {
@@ -434,10 +436,12 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 </body>
 </html>`))
 
-func newUIHandler(controller *clientController, logger zerolog.Logger, password string) http.Handler {
+func newUIHandler(controller *clientController, logger zerolog.Logger, password, listenAddr string) http.Handler {
 	h := &uiHandler{
-		controller: controller,
-		logger:     logger,
+		controller:    controller,
+		logger:        logger,
+		listenAddr:    listenAddr,
+		allowedOrigin: "http://" + listenAddr,
 	}
 
 	mux := http.NewServeMux()
@@ -445,8 +449,16 @@ func newUIHandler(controller *clientController, logger zerolog.Logger, password 
 	mux.HandleFunc("/settings", h.handleSettings)
 	mux.HandleFunc("/api/status", h.handleStatus)
 
+	// Wrap with security headers.
+	secured := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		mux.ServeHTTP(w, r)
+	})
+
 	if password == "" {
-		return mux
+		return secured
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -457,7 +469,7 @@ func newUIHandler(controller *clientController, logger zerolog.Logger, password 
 			return
 		}
 
-		mux.ServeHTTP(w, r)
+		secured.ServeHTTP(w, r)
 	})
 }
 
@@ -472,9 +484,12 @@ func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if cfg.Token != "" {
 		masked = maskToken(cfg.Token)
 	}
+	// Clear raw token before passing to template — only the masked version is needed.
+	templateCfg := cfg
+	templateCfg.Token = ""
 	data := statusPageData{
 		Status:      status,
-		Config:      cfg,
+		Config:      templateCfg,
 		TokenMasked: masked,
 		Message:     strings.TrimSpace(r.URL.Query().Get("message")),
 		Error:       strings.TrimSpace(r.URL.Query().Get("error")),
@@ -492,14 +507,9 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host := r.Host
-	if host == "" {
-		host = r.URL.Host
-	}
-	allowed := "http://" + host
-	allowedS := "https://" + host
+	allowed := h.allowedOrigin
 	if origin := r.Header.Get("Origin"); origin != "" {
-		if origin != allowed && origin != allowedS {
+		if origin != allowed {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -510,7 +520,7 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		refererOrigin := parsed.Scheme + "://" + parsed.Host
-		if refererOrigin != allowed && refererOrigin != allowedS {
+		if refererOrigin != allowed {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -519,6 +529,7 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
 	if err := r.ParseForm(); err != nil {
 		redirectWithMessage(w, r, "", "failed to parse form")
 		return
@@ -535,8 +546,8 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	cfg.LogLevel = strings.TrimSpace(r.FormValue("log_level"))
 	if raw := strings.TrimSpace(r.FormValue("max_connections")); raw != "" {
 		maxConnections, convErr := strconv.Atoi(raw)
-		if convErr != nil || maxConnections < 1 {
-			redirectWithMessage(w, r, "", "max connections must be an integer >= 1")
+		if convErr != nil || maxConnections < 1 || maxConnections > 32 {
+			redirectWithMessage(w, r, "", "max connections must be between 1 and 32")
 			return
 		}
 		cfg.MaxConnections = maxConnections
