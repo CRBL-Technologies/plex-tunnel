@@ -312,11 +312,7 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
           <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="22" fill="#D97706">P</text>
         </svg>
       </div>
-      <h1 style="text-align:center;margin:0 0 8px;">
-        <svg width="210" height="28" viewBox="0 0 420 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <text x="0" y="40" font-family="'Inter', system-ui, -apple-system, sans-serif" font-weight="600" font-size="40" letter-spacing="-0.5"><tspan fill="#D97706">P</tspan><tspan fill="#1C1917">ortless Client</tspan></text>
-        </svg>
-      </h1>
+      <h1 style="text-align:center;margin:0 0 8px;font-size:1.4rem;font-weight:600;"><span style="color:#D97706">P</span>ortless Client</h1>
       <h2 class="section-title">
         Connection Status
         <span class="info-bubble" tabindex="0" data-tip="Shows live tunnel state. Status updates every 5 seconds.">i</span>
