@@ -68,10 +68,14 @@ All configuration is passed as environment variables:
 | `PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING` | no | `false` | Emit per-chunk timing logs for Plex reads and tunnel sends, including lock wait, frame encoding, and websocket write time; set `PLEXTUNNEL_LOG_LEVEL=debug` to see them |
 | `PLEXTUNNEL_RESPONSE_CHUNK_SIZE` | no | `65536` | Response chunk size in bytes for proxied Plex responses |
 | `PLEXTUNNEL_UI_LISTEN` | no | `127.0.0.1:9090` | Local status UI address; set empty to disable |
+| `PLEXTUNNEL_UI_PASSWORD` | no | — | HTTP Basic Auth password for the status UI; required when UI is bound to a non-loopback address |
+| `PLEXTUNNEL_PING_INTERVAL` | no | `30s` | WebSocket ping interval (Go duration, e.g. `30s`) |
+| `PLEXTUNNEL_PONG_TIMEOUT` | no | `10s` | How long to wait for a pong reply before considering the connection dead |
+| `PLEXTUNNEL_MAX_RECONNECT_DELAY` | no | `60s` | Maximum backoff delay between reconnection attempts |
 
 ## Status UI
 
-The client exposes a local status page at `http://127.0.0.1:9090/` showing connection state, session ID, pool size, active websocket count, and recent errors. Settings can be changed from the UI without restarting the container.
+The client exposes a local status page at `http://127.0.0.1:9090/` showing connection state, session ID, pool size, active websocket count, and recent errors. Settings can be changed from the UI without restarting the container. If you bind the UI to a non-loopback address (e.g. `0.0.0.0:9090`), set `PLEXTUNNEL_UI_PASSWORD` to protect it with HTTP Basic Auth.
 
 ## CI/CD
 
