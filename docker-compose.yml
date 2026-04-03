@@ -1,6 +1,6 @@
 services:
   plex:
-    image: plexinc/pms-docker:latest
+    image: plexinc/pms-docker:1.43.0.10492-121068a07
     container_name: plex
     restart: unless-stopped
     network_mode: host
