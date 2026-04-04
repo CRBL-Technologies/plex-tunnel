@@ -1,0 +1,12 @@
+.git
+.github
+.gitignore
+.dockerignore
+.claude/
+*.md
+LICENSE
+Makefile
+configs/
+testdata/
+scripts/
+docker-compose*.yml
