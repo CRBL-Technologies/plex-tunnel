@@ -44,7 +44,7 @@ func main() {
 	uiPassword := os.Getenv("PLEXTUNNEL_UI_PASSWORD")
 	if uiListen != "" {
 		if !isLoopbackUIListen(uiListen) && uiPassword == "" {
-			logger.Warn().Msg("UI bound to non-loopback address without password — set PLEXTUNNEL_UI_PASSWORD to protect it")
+			logger.Fatal().Msg("UI bound to non-loopback address without password — set PLEXTUNNEL_UI_PASSWORD to protect it")
 		}
 
 		srv := &http.Server{

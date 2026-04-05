@@ -196,6 +196,9 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 	if newMax < 1 {
 		newMax = 1
 	}
+	if newMax > maxPoolConnections {
+		newMax = maxPoolConnections
+	}
 
 	p.mu.Lock()
 	oldMax = p.maxConns

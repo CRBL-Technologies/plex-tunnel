@@ -23,9 +23,41 @@ esac
 
 BIN="plextunnel-client-${OS}-${ARCH}"
 URL="$REPO_URL/releases/download/$VERSION/$BIN"
+CHECKSUM_URL="${URL}.sha256"
+CHECKSUM_FILE="${BIN}.sha256"
 
-curl -fsSL "$URL" -o plextunnel-client
-chmod +x plextunnel-client
-sudo mv plextunnel-client /usr/local/bin/plextunnel-client
+if ! curl -fsSL "$URL" -o "$BIN"; then
+  echo "Failed to download $URL"
+  rm -f "$BIN" "$CHECKSUM_FILE"
+  exit 1
+fi
+
+if ! curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_FILE"; then
+  echo "Failed to download $CHECKSUM_URL"
+  rm -f "$BIN" "$CHECKSUM_FILE"
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  if ! sha256sum -c "$CHECKSUM_FILE"; then
+    echo "Checksum verification failed for $BIN"
+    rm -f "$BIN" "$CHECKSUM_FILE"
+    exit 1
+  fi
+elif command -v shasum >/dev/null 2>&1; then
+  if ! shasum -a 256 -c "$CHECKSUM_FILE"; then
+    echo "Checksum verification failed for $BIN"
+    rm -f "$BIN" "$CHECKSUM_FILE"
+    exit 1
+  fi
+else
+  echo "Neither sha256sum nor shasum is available to verify the download."
+  rm -f "$BIN" "$CHECKSUM_FILE"
+  exit 1
+fi
+
+chmod +x "$BIN"
+sudo mv "$BIN" /usr/local/bin/plextunnel-client
+rm -f "$CHECKSUM_FILE"
 
 echo "Installed plextunnel-client from $URL"

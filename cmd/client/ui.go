@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 
 	"github.com/CRBL-Technologies/plex-tunnel/pkg/client"
@@ -453,6 +454,7 @@ func newUIHandler(controller *clientController, logger zerolog.Logger, password,
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/settings", h.handleSettings)
 	mux.HandleFunc("/api/status", h.handleStatus)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// Wrap with security headers.
 	secured := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
