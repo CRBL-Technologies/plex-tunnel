@@ -18,7 +18,7 @@ func TestRunSessionHandshakeSendsProtocolVersion(t *testing.T) {
 	serverErrCh := make(chan error, 1)
 	registerCh := make(chan tunnel.Message, 1)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			serverErrCh <- err
@@ -93,7 +93,7 @@ func TestRunSessionHandshakeSendsProtocolVersion(t *testing.T) {
 }
 
 func TestRunSessionProtocolVersionMismatchError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			return
@@ -131,7 +131,7 @@ func TestRunSessionProtocolVersionMismatchError(t *testing.T) {
 
 func TestRunSessionOldServerHandshakeHint(t *testing.T) {
 	serverErrCh := make(chan error, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			serverErrCh <- err
@@ -175,7 +175,7 @@ func TestRunSessionOldServerHandshakeHint(t *testing.T) {
 }
 
 func TestRunSessionRequiresV2SessionMetadata(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			return
@@ -216,7 +216,7 @@ func TestRunSessionExpandsConnectionPool(t *testing.T) {
 	serverErrCh := make(chan error, 8)
 	registerCh := make(chan tunnel.Message, 4)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			serverErrCh <- err
@@ -315,7 +315,7 @@ func TestRunSessionHandlesMaxConnectionsUpdate(t *testing.T) {
 	serverErrCh := make(chan error, 8)
 	registerCh := make(chan tunnel.Message, 4)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			serverErrCh <- err
@@ -440,5 +440,8 @@ func TestRunSessionHandlesMaxConnectionsUpdate(t *testing.T) {
 }
 
 func toWebSocketURL(httpURL string) string {
-	return "ws" + strings.TrimPrefix(httpURL, "http")
+	if strings.HasPrefix(httpURL, "https://") {
+		return "wss://" + strings.TrimPrefix(httpURL, "https://")
+	}
+	return "ws://" + strings.TrimPrefix(httpURL, "http://")
 }

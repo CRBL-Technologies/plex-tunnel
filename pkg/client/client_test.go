@@ -1,6 +1,28 @@
 package client
 
-import "testing"
+import (
+	"context"
+	"crypto/tls"
+	"net/http"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/rs/zerolog"
+)
+
+func TestMain(m *testing.M) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{}
+	} else {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+	}
+	transport.TLSClientConfig.InsecureSkipVerify = true
+	http.DefaultTransport = transport
+
+	os.Exit(m.Run())
+}
 
 func TestResolveTargetURL(t *testing.T) {
 	baseTarget := "http://127.0.0.1:32400"
@@ -57,5 +79,19 @@ func TestResolveTargetURL(t *testing.T) {
 				t.Fatalf("resolveTargetURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunSession_RejectsPlaintextWebSocket(t *testing.T) {
+	c := New(Config{
+		ServerURL: "ws://example.test/tunnel",
+	}, zerolog.Nop())
+
+	err := c.runSession(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to connect over unencrypted ws://") {
+		t.Fatalf("error = %q, want substring %q", err.Error(), "refusing to connect over unencrypted ws://")
 	}
 }

@@ -454,7 +454,7 @@ func newUIHandler(controller *clientController, logger zerolog.Logger, password,
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/settings", h.handleSettings)
 	mux.HandleFunc("/api/status", h.handleStatus)
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", promhttp.HandlerFor(client.MetricsRegistry, promhttp.HandlerOpts{}))
 
 	// Wrap with security headers.
 	secured := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -544,7 +544,7 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	cfg, _ := h.controller.Snapshot()
 	submittedToken := strings.TrimSpace(r.FormValue("token"))
-	if submittedToken != "" && submittedToken != maskToken(cfg.Token) && !strings.HasPrefix(submittedToken, "****") {
+	if submittedToken != "" && submittedToken != maskToken(cfg.Token) {
 		cfg.Token = submittedToken
 	}
 	cfg.ServerURL = strings.TrimSpace(r.FormValue("server_url"))

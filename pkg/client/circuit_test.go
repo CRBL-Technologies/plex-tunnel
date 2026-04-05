@@ -76,3 +76,32 @@ func TestCircuitBreaker_ResetsOnSuccess(t *testing.T) {
 		t.Fatalf("failureCount = %d, want 0", breaker.failureCount())
 	}
 }
+
+func TestCircuitBreaker_HalfOpenFailureDoesNotResetCooldown(t *testing.T) {
+	breaker := newCircuitBreaker(1, 50*time.Millisecond, zerolog.Nop())
+	breaker.RecordFailure()
+
+	time.Sleep(60 * time.Millisecond)
+
+	if !breaker.Allow() {
+		t.Fatal("Allow() = false, want true after initial cooldown")
+	}
+	if breaker.stateValue() != circuitStateHalfOpen {
+		t.Fatalf("state after initial cooldown = %q, want %q", breaker.stateValue(), circuitStateHalfOpen)
+	}
+
+	breaker.RecordFailure()
+
+	if breaker.Allow() {
+		t.Fatal("Allow() = true, want false immediately after half-open failure")
+	}
+
+	time.Sleep(60 * time.Millisecond)
+
+	if !breaker.Allow() {
+		t.Fatal("Allow() = false, want true after reopened cooldown")
+	}
+	if breaker.stateValue() != circuitStateHalfOpen {
+		t.Fatalf("state after reopened cooldown = %q, want %q", breaker.stateValue(), circuitStateHalfOpen)
+	}
+}
