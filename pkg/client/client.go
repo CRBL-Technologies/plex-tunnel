@@ -177,7 +177,7 @@ func (c *Client) runSession(ctx context.Context) error {
 	}
 
 	if strings.HasPrefix(c.cfg.ServerURL, "ws://") {
-		c.logger.Warn().Str("url", c.cfg.ServerURL).Msg("connecting over unencrypted ws:// — tunnel token will be sent in plaintext; use wss:// in production")
+		return fmt.Errorf("refusing to connect over unencrypted ws:// — tunnel token would be sent in plaintext; use wss:// instead")
 	}
 
 	controlConn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
@@ -215,7 +215,6 @@ func (c *Client) runSession(ctx context.Context) error {
 	if grantedMax > maxPoolConnections {
 		grantedMax = maxPoolConnections
 	}
-	c.cfg.MaxConnections = grantedMax
 	pool := newConnectionPool(controlConn.RemoteAddr(), registerAck.Subdomain, registerAck.SessionID, grantedMax)
 	defer pool.close()
 

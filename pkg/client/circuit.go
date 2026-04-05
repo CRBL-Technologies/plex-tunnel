@@ -24,6 +24,7 @@ type circuitBreaker struct {
 	consecutiveFailures int
 	state               string
 	lastFailureTime     time.Time
+	halfOpenAt          time.Time
 }
 
 func newCircuitBreaker(threshold int, cooldown time.Duration, logger zerolog.Logger) *circuitBreaker {
@@ -50,7 +51,7 @@ func (c *circuitBreaker) Allow() bool {
 	case circuitStateClosed:
 		return true
 	case circuitStateOpen:
-		if time.Since(c.lastFailureTime) < c.cooldown {
+		if time.Since(c.halfOpenAt) < c.cooldown {
 			return false
 		}
 		c.transitionLocked(circuitStateHalfOpen, "circuit breaker half-open")
@@ -68,6 +69,7 @@ func (c *circuitBreaker) RecordSuccess() {
 
 	c.consecutiveFailures = 0
 	c.lastFailureTime = time.Time{}
+	c.halfOpenAt = time.Time{}
 	c.transitionLocked(circuitStateClosed, "circuit breaker closed")
 }
 
@@ -75,16 +77,19 @@ func (c *circuitBreaker) RecordFailure() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	now := time.Now()
 	c.consecutiveFailures++
-	c.lastFailureTime = time.Now()
+	c.lastFailureTime = now
 
 	switch c.state {
 	case circuitStateHalfOpen:
+		c.halfOpenAt = now
 		c.transitionLocked(circuitStateOpen, "circuit breaker reopened")
 	case circuitStateOpen:
-		// Keep the circuit open and refresh the cooldown window.
+		// Keep the circuit open without extending the cooldown window.
 	default:
 		if c.consecutiveFailures >= c.threshold {
+			c.halfOpenAt = now
 			c.transitionLocked(circuitStateOpen, "circuit breaker opened")
 		}
 	}
