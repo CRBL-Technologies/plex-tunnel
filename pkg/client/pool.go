@@ -267,6 +267,13 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 		cancel()
 	}
 	for _, connRef := range removedConns {
+		// Wait briefly for active streams to finish before closing.
+		for i := 0; i < 50; i++ {
+			if connRef.streams.Load() == 0 {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 		_ = connRef.conn.Close()
 	}
 
