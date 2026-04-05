@@ -236,3 +236,66 @@ func TestPoolResize_ScaleDown_PromotesControl(t *testing.T) {
 	default:
 	}
 }
+
+func TestPoolResize_ClampsBounds(t *testing.T) {
+	pool := newConnectionPool("server", "subdomain", "session", 4)
+
+	oldMax, newMax, promoted := pool.Resize(0)
+	if oldMax != 4 {
+		t.Fatalf("oldMax = %d, want 4", oldMax)
+	}
+	if newMax != 1 {
+		t.Fatalf("newMax = %d, want 1", newMax)
+	}
+	if promoted != nil {
+		t.Fatalf("promoted = %+v, want nil", promoted)
+	}
+	if pool.maxConns != 1 {
+		t.Fatalf("pool.maxConns = %d, want 1", pool.maxConns)
+	}
+
+	oldMax, newMax, promoted = pool.Resize(maxPoolConnections + 10)
+	if oldMax != 1 {
+		t.Fatalf("oldMax = %d, want 1", oldMax)
+	}
+	if newMax != maxPoolConnections {
+		t.Fatalf("newMax = %d, want %d", newMax, maxPoolConnections)
+	}
+	if promoted != nil {
+		t.Fatalf("promoted = %+v, want nil", promoted)
+	}
+	if pool.maxConns != maxPoolConnections {
+		t.Fatalf("pool.maxConns = %d, want %d", pool.maxConns, maxPoolConnections)
+	}
+	if len(pool.conns) != maxPoolConnections {
+		t.Fatalf("len(pool.conns) = %d, want %d", len(pool.conns), maxPoolConnections)
+	}
+}
+
+func TestPoolResize_ScaleDown_ClosesActiveConnections(t *testing.T) {
+	conn2 := newTestSocketPair(t)
+
+	pool := newConnectionPool("server", "subdomain", "session", 4)
+	pool.conns[2] = &poolConn{conn: conn2.client, index: 2}
+	connRef := pool.conns[2]
+	connRef.streams.Store(1)
+
+	slot2Canceled := make(chan struct{})
+	pool.slotCancels[2] = func() { close(slot2Canceled) }
+
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		connRef.streams.Store(0)
+	}()
+
+	_, newMax, promoted := pool.Resize(2)
+	if newMax != 2 {
+		t.Fatalf("newMax = %d, want 2", newMax)
+	}
+	if promoted != nil {
+		t.Fatalf("promoted = %+v, want nil", promoted)
+	}
+
+	waitForClose(t, slot2Canceled)
+	waitForClose(t, conn2.closed)
+}
