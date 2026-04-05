@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -437,11 +438,15 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 </html>`))
 
 func newUIHandler(controller *clientController, logger zerolog.Logger, password, listenAddr string) http.Handler {
+	allowedOrigin := os.Getenv("PLEXTUNNEL_UI_ORIGIN")
+	if allowedOrigin == "" {
+		allowedOrigin = "http://" + listenAddr
+	}
 	h := &uiHandler{
 		controller:    controller,
 		logger:        logger,
 		listenAddr:    listenAddr,
-		allowedOrigin: "http://" + listenAddr,
+		allowedOrigin: allowedOrigin,
 	}
 
 	mux := http.NewServeMux()
@@ -537,7 +542,7 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	cfg, _ := h.controller.Snapshot()
 	submittedToken := strings.TrimSpace(r.FormValue("token"))
-	if submittedToken != "" && submittedToken != maskToken(cfg.Token) {
+	if submittedToken != "" && submittedToken != maskToken(cfg.Token) && !strings.HasPrefix(submittedToken, "****") {
 		cfg.Token = submittedToken
 	}
 	cfg.ServerURL = strings.TrimSpace(r.FormValue("server_url"))

@@ -4,10 +4,17 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var subdomainPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+func isValidSubdomain(s string) bool {
+	return len(s) <= 63 && subdomainPattern.MatchString(s)
+}
 
 type Config struct {
 	Token             string
@@ -46,6 +53,11 @@ func LoadConfig() (Config, error) {
 	}
 	if parsed, err := url.Parse(cfg.ServerURL); err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
 		return Config{}, fmt.Errorf("PLEXTUNNEL_SERVER_URL must be a ws:// or wss:// URL")
+	}
+	if cfg.Subdomain != "" {
+		if !isValidSubdomain(cfg.Subdomain) {
+			return Config{}, fmt.Errorf("PLEXTUNNEL_SUBDOMAIN contains invalid characters (use lowercase letters, numbers, and hyphens)")
+		}
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING")); raw != "" {
