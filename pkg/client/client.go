@@ -173,6 +173,10 @@ func (c *Client) runSession(ctx context.Context) error {
 		requestedMaxConnections = 1
 	}
 
+	if strings.HasPrefix(c.cfg.ServerURL, "ws://") {
+		c.logger.Warn().Str("url", c.cfg.ServerURL).Msg("connecting over unencrypted ws:// — tunnel token will be sent in plaintext; use wss:// in production")
+	}
+
 	controlConn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
 		return fmt.Errorf("connect server websocket: %w", err)
@@ -317,9 +321,9 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 			}
 			session.resize(capped)
 		case tunnel.MsgWSOpen, tunnel.MsgWSFrame, tunnel.MsgWSClose, tunnel.MsgKeyExchange:
-			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported websocket message type")
+			c.logger.Warn().Uint8("type", uint8(msg.Type)).Msg("received unsupported message type — server may require a client update")
 		default:
-			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported message type")
+			c.logger.Warn().Uint8("type", uint8(msg.Type)).Msg("received unknown message type — server may require a client update")
 		}
 	}
 }
@@ -371,7 +375,11 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 	}
 
 	for key, values := range msg.Headers {
-		if http.CanonicalHeaderKey(key) == "Host" {
+		canonical := http.CanonicalHeaderKey(key)
+		// Skip headers that should not be forwarded to the upstream.
+		switch canonical {
+		case "Host", "Connection", "Keep-Alive", "Proxy-Authorization",
+			"Proxy-Connection", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
 			continue
 		}
 		for _, value := range values {
