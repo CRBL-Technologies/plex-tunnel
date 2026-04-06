@@ -2,27 +2,11 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
-	"net/http"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
 )
-
-func TestMain(m *testing.M) {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if transport.TLSClientConfig == nil {
-		transport.TLSClientConfig = &tls.Config{}
-	} else {
-		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
-	}
-	transport.TLSClientConfig.InsecureSkipVerify = true
-	http.DefaultTransport = transport
-
-	os.Exit(m.Run())
-}
 
 func TestResolveTargetURL(t *testing.T) {
 	baseTarget := "http://127.0.0.1:32400"
