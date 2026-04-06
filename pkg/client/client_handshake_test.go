@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,6 +49,7 @@ func TestRunSessionHandshakeSendsProtocolVersion(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -107,6 +110,7 @@ func TestRunSessionProtocolVersionMismatchError(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -146,6 +150,7 @@ func TestRunSessionOldServerHandshakeHint(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -190,6 +195,7 @@ func TestRunSessionRequiresV2SessionMetadata(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -245,6 +251,7 @@ func TestRunSessionExpandsConnectionPool(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -369,6 +376,7 @@ func TestRunSessionHandlesMaxConnectionsUpdate(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -444,4 +452,26 @@ func toWebSocketURL(httpURL string) string {
 		return "wss://" + strings.TrimPrefix(httpURL, "https://")
 	}
 	return "ws://" + strings.TrimPrefix(httpURL, "http://")
+}
+
+// withPinnedTLS installs an http.DefaultTransport clone whose RootCAs
+// trusts only srv.Certificate(), then restores the original transport
+// via t.Cleanup. Do not call with t.Parallel active.
+func withPinnedTLS(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	if srv.Certificate() == nil {
+		t.Fatal("withPinnedTLS: srv has no TLS certificate; use httptest.NewTLSServer")
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+
+	orig := http.DefaultTransport
+	base, ok := orig.(*http.Transport)
+	if !ok {
+		t.Fatalf("withPinnedTLS: http.DefaultTransport is %T, want *http.Transport", orig)
+	}
+	clone := base.Clone()
+	clone.TLSClientConfig = &tls.Config{RootCAs: pool}
+	http.DefaultTransport = clone
+	t.Cleanup(func() { http.DefaultTransport = orig })
 }
