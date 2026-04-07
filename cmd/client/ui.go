@@ -7,11 +7,13 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 
 	"github.com/CRBL-Technologies/plex-tunnel/pkg/client"
@@ -437,17 +439,22 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 </html>`))
 
 func newUIHandler(controller *clientController, logger zerolog.Logger, password, listenAddr string) http.Handler {
+	allowedOrigin := os.Getenv("PLEXTUNNEL_UI_ORIGIN")
+	if allowedOrigin == "" {
+		allowedOrigin = "http://" + listenAddr
+	}
 	h := &uiHandler{
 		controller:    controller,
 		logger:        logger,
 		listenAddr:    listenAddr,
-		allowedOrigin: "http://" + listenAddr,
+		allowedOrigin: allowedOrigin,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/settings", h.handleSettings)
 	mux.HandleFunc("/api/status", h.handleStatus)
+	mux.Handle("/metrics", promhttp.HandlerFor(client.MetricsRegistry, promhttp.HandlerOpts{}))
 
 	// Wrap with security headers.
 	secured := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

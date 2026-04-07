@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,7 +20,7 @@ func TestRunSessionHandshakeSendsProtocolVersion(t *testing.T) {
 	serverErrCh := make(chan error, 1)
 	registerCh := make(chan tunnel.Message, 1)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			serverErrCh <- err
@@ -47,6 +49,7 @@ func TestRunSessionHandshakeSendsProtocolVersion(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -93,7 +96,7 @@ func TestRunSessionHandshakeSendsProtocolVersion(t *testing.T) {
 }
 
 func TestRunSessionProtocolVersionMismatchError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			return
@@ -107,6 +110,7 @@ func TestRunSessionProtocolVersionMismatchError(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -131,7 +135,7 @@ func TestRunSessionProtocolVersionMismatchError(t *testing.T) {
 
 func TestRunSessionOldServerHandshakeHint(t *testing.T) {
 	serverErrCh := make(chan error, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			serverErrCh <- err
@@ -146,6 +150,7 @@ func TestRunSessionOldServerHandshakeHint(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -175,7 +180,7 @@ func TestRunSessionOldServerHandshakeHint(t *testing.T) {
 }
 
 func TestRunSessionRequiresV2SessionMetadata(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			return
@@ -190,6 +195,7 @@ func TestRunSessionRequiresV2SessionMetadata(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -216,7 +222,7 @@ func TestRunSessionExpandsConnectionPool(t *testing.T) {
 	serverErrCh := make(chan error, 8)
 	registerCh := make(chan tunnel.Message, 4)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			serverErrCh <- err
@@ -245,6 +251,7 @@ func TestRunSessionExpandsConnectionPool(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -315,7 +322,7 @@ func TestRunSessionHandlesMaxConnectionsUpdate(t *testing.T) {
 	serverErrCh := make(chan error, 8)
 	registerCh := make(chan tunnel.Message, 4)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)
 		if err != nil {
 			serverErrCh <- err
@@ -369,6 +376,7 @@ func TestRunSessionHandlesMaxConnectionsUpdate(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
+	withPinnedTLS(t, srv)
 
 	cfg := Config{
 		Token:             "token-123",
@@ -440,5 +448,30 @@ func TestRunSessionHandlesMaxConnectionsUpdate(t *testing.T) {
 }
 
 func toWebSocketURL(httpURL string) string {
-	return "ws" + strings.TrimPrefix(httpURL, "http")
+	if strings.HasPrefix(httpURL, "https://") {
+		return "wss://" + strings.TrimPrefix(httpURL, "https://")
+	}
+	return "ws://" + strings.TrimPrefix(httpURL, "http://")
+}
+
+// withPinnedTLS installs an http.DefaultTransport clone whose RootCAs
+// trusts only srv.Certificate(), then restores the original transport
+// via t.Cleanup. Do not call with t.Parallel active.
+func withPinnedTLS(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	if srv.Certificate() == nil {
+		t.Fatal("withPinnedTLS: srv has no TLS certificate; use httptest.NewTLSServer")
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+
+	orig := http.DefaultTransport
+	base, ok := orig.(*http.Transport)
+	if !ok {
+		t.Fatalf("withPinnedTLS: http.DefaultTransport is %T, want *http.Transport", orig)
+	}
+	clone := base.Clone()
+	clone.TLSClientConfig = &tls.Config{RootCAs: pool}
+	http.DefaultTransport = clone
+	t.Cleanup(func() { http.DefaultTransport = orig })
 }

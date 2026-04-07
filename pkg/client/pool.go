@@ -196,6 +196,9 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 	if newMax < 1 {
 		newMax = 1
 	}
+	if newMax > maxPoolConnections {
+		newMax = maxPoolConnections
+	}
 
 	p.mu.Lock()
 	oldMax = p.maxConns
@@ -266,9 +269,18 @@ func (p *ConnectionPool) Resize(newMax int) (oldMax, updatedMax int, promoted *p
 	for _, cancel := range removedCancels {
 		cancel()
 	}
-	for _, connRef := range removedConns {
-		_ = connRef.conn.Close()
-	}
+	go func(removedConns []*poolConn) {
+		for _, connRef := range removedConns {
+			// Wait briefly for active streams to finish before closing.
+			for i := 0; i < 50; i++ {
+				if connRef.streams.Load() == 0 {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			_ = connRef.conn.Close()
+		}
+	}(removedConns)
 
 	return oldMax, newMax, promoted
 }

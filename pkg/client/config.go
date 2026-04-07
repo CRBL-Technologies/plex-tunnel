@@ -4,38 +4,47 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
+var subdomainPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+func isValidSubdomain(s string) bool {
+	return len(s) <= 63 && subdomainPattern.MatchString(s)
+}
+
 type Config struct {
-	Token             string
-	ServerURL         string
-	PlexTarget        string
-	Subdomain         string
-	LogLevel          string
-	DebugBandwidthLog bool
-	MaxConnections    int
-	PingInterval      time.Duration
-	PongTimeout       time.Duration
-	MaxReconnectDelay time.Duration
-	ResponseChunkSize int
+	Token                 string
+	ServerURL             string
+	PlexTarget            string
+	Subdomain             string
+	LogLevel              string
+	DebugBandwidthLog     bool
+	MaxConnections        int
+	PingInterval          time.Duration
+	PongTimeout           time.Duration
+	MaxReconnectDelay     time.Duration
+	ResponseChunkSize     int
+	ResponseHeaderTimeout time.Duration
 }
 
 func LoadConfig() (Config, error) {
 	cfg := Config{
-		Token:             strings.TrimSpace(os.Getenv("PLEXTUNNEL_TOKEN")),
-		ServerURL:         strings.TrimSpace(os.Getenv("PLEXTUNNEL_SERVER_URL")),
-		PlexTarget:        getenvDefault("PLEXTUNNEL_PLEX_TARGET", "http://127.0.0.1:32400"),
-		Subdomain:         strings.TrimSpace(os.Getenv("PLEXTUNNEL_SUBDOMAIN")),
-		LogLevel:          getenvDefault("PLEXTUNNEL_LOG_LEVEL", "info"),
-		DebugBandwidthLog: false,
-		MaxConnections:    4,
-		PingInterval:      30 * time.Second,
-		PongTimeout:       10 * time.Second,
-		MaxReconnectDelay: 60 * time.Second,
-		ResponseChunkSize: 64 * 1024,
+		Token:                 strings.TrimSpace(os.Getenv("PLEXTUNNEL_TOKEN")),
+		ServerURL:             strings.TrimSpace(os.Getenv("PLEXTUNNEL_SERVER_URL")),
+		PlexTarget:            getenvDefault("PLEXTUNNEL_PLEX_TARGET", "http://127.0.0.1:32400"),
+		Subdomain:             strings.TrimSpace(os.Getenv("PLEXTUNNEL_SUBDOMAIN")),
+		LogLevel:              getenvDefault("PLEXTUNNEL_LOG_LEVEL", "info"),
+		DebugBandwidthLog:     false,
+		MaxConnections:        4,
+		PingInterval:          30 * time.Second,
+		PongTimeout:           10 * time.Second,
+		MaxReconnectDelay:     60 * time.Second,
+		ResponseChunkSize:     64 * 1024,
+		ResponseHeaderTimeout: 30 * time.Second,
 	}
 
 	if cfg.Token == "" {
@@ -46,6 +55,11 @@ func LoadConfig() (Config, error) {
 	}
 	if parsed, err := url.Parse(cfg.ServerURL); err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
 		return Config{}, fmt.Errorf("PLEXTUNNEL_SERVER_URL must be a ws:// or wss:// URL")
+	}
+	if cfg.Subdomain != "" {
+		if !isValidSubdomain(cfg.Subdomain) {
+			return Config{}, fmt.Errorf("PLEXTUNNEL_SUBDOMAIN contains invalid characters (use lowercase letters, numbers, and hyphens)")
+		}
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING")); raw != "" {
@@ -100,6 +114,14 @@ func LoadConfig() (Config, error) {
 			return Config{}, fmt.Errorf("PLEXTUNNEL_RESPONSE_CHUNK_SIZE must be between 1024 and 4194304")
 		}
 		cfg.ResponseChunkSize = chunkSize
+	}
+
+	if timeoutValue := strings.TrimSpace(os.Getenv("PLEXTUNNEL_RESPONSE_HEADER_TIMEOUT")); timeoutValue != "" {
+		timeout, err := time.ParseDuration(timeoutValue)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid PLEXTUNNEL_RESPONSE_HEADER_TIMEOUT: %w", err)
+		}
+		cfg.ResponseHeaderTimeout = timeout
 	}
 
 	return cfg, nil

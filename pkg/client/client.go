@@ -25,9 +25,10 @@ const (
 )
 
 type Client struct {
-	cfg    Config
-	logger zerolog.Logger
-	client *http.Client
+	cfg     Config
+	logger  zerolog.Logger
+	client  *http.Client
+	circuit *circuitBreaker
 
 	streamSem chan struct{}
 	stateMu   sync.RWMutex
@@ -109,9 +110,10 @@ func New(cfg Config, logger zerolog.Logger) *Client {
 				MaxIdleConns:          100,
 				MaxIdleConnsPerHost:   10,
 				IdleConnTimeout:       90 * time.Second,
-				ResponseHeaderTimeout: 30 * time.Second,
+				ResponseHeaderTimeout: cfg.ResponseHeaderTimeout,
 			},
 		},
+		circuit:   newCircuitBreaker(circuitBreakerDefaultThreshold, circuitBreakerDefaultCooldown, logger),
 		streamSem: make(chan struct{}, maxConcurrentStreams),
 	}
 }
@@ -126,6 +128,7 @@ func (c *Client) updateStatus(fn func(*ConnectionStatus)) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	fn(&c.state)
+	setConnectedMetric(c.state.Connected)
 }
 
 func (c *Client) Run(ctx context.Context) error {
@@ -173,6 +176,10 @@ func (c *Client) runSession(ctx context.Context) error {
 		requestedMaxConnections = 1
 	}
 
+	if strings.HasPrefix(c.cfg.ServerURL, "ws://") {
+		return fmt.Errorf("refusing to connect over unencrypted ws:// — tunnel token would be sent in plaintext; use wss:// instead")
+	}
+
 	controlConn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
 		return fmt.Errorf("connect server websocket: %w", err)
@@ -208,7 +215,6 @@ func (c *Client) runSession(ctx context.Context) error {
 	if grantedMax > maxPoolConnections {
 		grantedMax = maxPoolConnections
 	}
-	c.cfg.MaxConnections = grantedMax
 	pool := newConnectionPool(controlConn.RemoteAddr(), registerAck.Subdomain, registerAck.SessionID, grantedMax)
 	defer pool.close()
 
@@ -280,7 +286,9 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 			go func(request tunnel.Message) {
 				defer func() { <-c.streamSem }()
 				connRef.streams.Add(1)
+				activeStreamsMetric.Inc()
 				defer connRef.streams.Add(-1)
+				defer activeStreamsMetric.Dec()
 
 				reqCtx, reqCancel := context.WithTimeout(ctx, proxyRequestTimeout)
 				defer reqCancel()
@@ -317,9 +325,9 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 			}
 			session.resize(capped)
 		case tunnel.MsgWSOpen, tunnel.MsgWSFrame, tunnel.MsgWSClose, tunnel.MsgKeyExchange:
-			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported websocket message type")
+			c.logger.Warn().Uint8("type", uint8(msg.Type)).Msg("received unsupported message type — server may require a client update")
 		default:
-			c.logger.Debug().Uint8("type", uint8(msg.Type)).Msg("ignoring unsupported message type")
+			c.logger.Warn().Uint8("type", uint8(msg.Type)).Msg("received unknown message type — server may require a client update")
 		}
 	}
 }
@@ -371,20 +379,30 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 	}
 
 	for key, values := range msg.Headers {
-		if http.CanonicalHeaderKey(key) == "Host" {
+		canonical := http.CanonicalHeaderKey(key)
+		// Skip headers that should not be forwarded to the upstream.
+		switch canonical {
+		case "Host", "Connection", "Keep-Alive", "Proxy-Authorization",
+			"Proxy-Connection", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
 			continue
 		}
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
 	}
+	if !c.circuit.Allow() {
+		c.logger.Info().Str("request_id", msg.ID).Msg("rejecting proxied request while circuit breaker is open")
+		return c.sendProxyError(conn, msg.ID, http.StatusServiceUnavailable, "upstream temporarily unavailable")
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		c.circuit.RecordFailure()
 		c.logger.Warn().Err(err).Str("request_id", msg.ID).Msg("upstream plex request failed")
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "upstream unavailable")
 	}
 	defer resp.Body.Close()
+	upstreamFailure := resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
 
 	requestLogger := c.logger.With().
 		Str("request_id", msg.ID).
@@ -418,6 +436,11 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 				err = conn.Send(responseMsg)
 			}
 			if err != nil {
+				if upstreamFailure {
+					c.circuit.RecordFailure()
+				} else {
+					c.circuit.RecordSuccess()
+				}
 				return fmt.Errorf("send response chunk: %w", err)
 			}
 			if c.cfg.DebugBandwidthLog {
@@ -440,6 +463,7 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 			break
 		}
 		if readErr != nil {
+			c.circuit.RecordFailure()
 			return fmt.Errorf("read proxied response body: %w", readErr)
 		}
 	}
@@ -457,6 +481,11 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 		err = conn.Send(finalMsg)
 	}
 	if err != nil {
+		if upstreamFailure {
+			c.circuit.RecordFailure()
+		} else {
+			c.circuit.RecordSuccess()
+		}
 		return fmt.Errorf("send final response chunk: %w", err)
 	}
 	if c.cfg.DebugBandwidthLog {
@@ -471,6 +500,13 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 			Int64("ws_write_ms", finalSendTiming.WebSocketWrite.Milliseconds()).
 			Msg("proxied response chunk timing")
 	}
+
+	if upstreamFailure {
+		c.circuit.RecordFailure()
+	} else {
+		c.circuit.RecordSuccess()
+	}
+	observeProxyResponse(resp.StatusCode)
 
 	return nil
 }
@@ -489,6 +525,7 @@ func (c *Client) sendProxyError(conn *tunnel.WebSocketConnection, requestID stri
 	if sendErr := conn.Send(errMsg); sendErr != nil {
 		return fmt.Errorf("send proxy error: %w", sendErr)
 	}
+	observeProxyResponse(status)
 	return nil
 }
 
