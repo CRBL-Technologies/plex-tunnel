@@ -255,15 +255,23 @@ func (c *Client) runSession(ctx context.Context) error {
 }
 
 func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, connRef *poolConn) error {
+	return c.readLoopWithConnection(ctx, session, connRef, connRef.conn)
+}
+
+func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoolController, connRef *poolConn, conn tunnel.Connection) error {
 	for {
-		msg, err := connRef.conn.Receive()
+		msg, err := conn.Receive()
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) && connRef.streams.Load() == 0 && ctx.Err() == nil {
+			// A quiet Receive during an active stream is not a teardown signal.
+			// Lane health is owned by the pong watchdog in pingLoop, so readLoop
+			// must keep retrying websocket read deadlines while the parent context
+			// is still alive. This avoids the 2026-04-08 staging lane teardown.
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 				c.logger.Debug().
 					Err(err).
 					Str("session_id", session.pool.sessionID).
 					Int("connection_index", connRef.index).
-					Msg("retrying idle tunnel connection after read timeout")
+					Msg("retrying tunnel connection after read timeout")
 				select {
 				case <-time.After(100 * time.Millisecond):
 				case <-ctx.Done():
@@ -297,7 +305,7 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 				}
 			}(msg)
 		case tunnel.MsgPing:
-			if err := connRef.conn.Send(tunnel.Message{Type: tunnel.MsgPong}); err != nil {
+			if err := conn.Send(tunnel.Message{Type: tunnel.MsgPong}); err != nil {
 				return fmt.Errorf("send pong: %w", err)
 			}
 		case tunnel.MsgPong:
