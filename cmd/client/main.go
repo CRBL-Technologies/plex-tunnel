@@ -42,14 +42,28 @@ func main() {
 
 	uiListen := getenvDefault("PLEXTUNNEL_UI_LISTEN", "127.0.0.1:9090")
 	uiPassword := os.Getenv("PLEXTUNNEL_UI_PASSWORD")
+	uiUsername := strings.TrimSpace(os.Getenv("PLEXTUNNEL_UI_USERNAME"))
+	sessionTTL := 7 * 24 * time.Hour
+	if rawSessionTTL := strings.TrimSpace(os.Getenv("PLEXTUNNEL_UI_SESSION_TTL")); rawSessionTTL != "" {
+		parsedSessionTTL, err := time.ParseDuration(rawSessionTTL)
+		if err != nil {
+			logger.Fatal().Err(err).Msg("invalid PLEXTUNNEL_UI_SESSION_TTL")
+		}
+		sessionTTL = parsedSessionTTL
+	}
 	if uiListen != "" {
 		if !isLoopbackUIListen(uiListen) && uiPassword == "" {
 			logger.Fatal().Msg("UI bound to non-loopback address without password — set PLEXTUNNEL_UI_PASSWORD to protect it")
 		}
 
+		sessions := newSessionStore(sessionTTL)
+		sessions.StartGC(ctx)
+		loginLimiter := newLoginRateLimiter()
+		loginLimiter.StartGC(ctx)
+
 		srv := &http.Server{
 			Addr:              uiListen,
-			Handler:           newUIHandler(controller, logger, uiPassword, uiListen),
+			Handler:           newUIHandler(controller, logger, authConfig{Username: uiUsername, Password: uiPassword}, sessions, loginLimiter, uiListen),
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       15 * time.Second,
 			WriteTimeout:      30 * time.Second,
