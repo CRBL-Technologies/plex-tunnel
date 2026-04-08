@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"html/template"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -124,13 +125,16 @@ func (c *clientController) Snapshot() (client.Config, client.ConnectionStatus) {
 }
 
 type uiHandler struct {
-	controller    *clientController
-	logger        zerolog.Logger
-	listenAddr    string
-	allowedOrigin string
-	auth          authConfig
-	sessions      *sessionStore
-	loginLimiter  *loginRateLimiter
+	controller     *clientController
+	logger         zerolog.Logger
+	listenAddr     string
+	originOverride string
+	listenHost     string
+	listenPort     string
+	bindAll        bool
+	auth           authConfig
+	sessions       *sessionStore
+	loginLimiter   *loginRateLimiter
 }
 
 type statusPageData struct {
@@ -458,9 +462,15 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 </html>`))
 
 func newUIHandler(controller *clientController, logger zerolog.Logger, auth authConfig, sessions *sessionStore, loginLimiter *loginRateLimiter, listenAddr string) http.Handler {
-	allowedOrigin := os.Getenv("PLEXTUNNEL_UI_ORIGIN")
-	if allowedOrigin == "" {
-		allowedOrigin = "http://" + listenAddr
+	originOverride := os.Getenv("PLEXTUNNEL_UI_ORIGIN")
+	listenHost, listenPort, err := net.SplitHostPort(listenAddr)
+	bindAll := false
+	if err != nil {
+		if originOverride == "" {
+			originOverride = "http://" + listenAddr
+		}
+	} else {
+		bindAll = isBindAllHost(listenHost)
 	}
 	if sessions == nil {
 		sessions = newSessionStore(7 * 24 * time.Hour)
@@ -469,13 +479,16 @@ func newUIHandler(controller *clientController, logger zerolog.Logger, auth auth
 		loginLimiter = newLoginRateLimiter()
 	}
 	h := &uiHandler{
-		controller:    controller,
-		logger:        logger,
-		listenAddr:    listenAddr,
-		allowedOrigin: allowedOrigin,
-		auth:          auth,
-		sessions:      sessions,
-		loginLimiter:  loginLimiter,
+		controller:     controller,
+		logger:         logger,
+		listenAddr:     listenAddr,
+		originOverride: originOverride,
+		listenHost:     listenHost,
+		listenPort:     listenPort,
+		bindAll:        bindAll,
+		auth:           auth,
+		sessions:       sessions,
+		loginLimiter:   loginLimiter,
 	}
 
 	mux := http.NewServeMux()
@@ -496,6 +509,15 @@ func newUIHandler(controller *clientController, logger zerolog.Logger, auth auth
 	})
 
 	return secured
+}
+
+func isBindAllHost(host string) bool {
+	switch strings.TrimSpace(host) {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -532,24 +554,7 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowed := h.allowedOrigin
-	if origin := r.Header.Get("Origin"); origin != "" {
-		if origin != allowed {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-	} else if referer := r.Header.Get("Referer"); referer != "" {
-		parsed, err := url.Parse(referer)
-		if err != nil {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		refererOrigin := parsed.Scheme + "://" + parsed.Host
-		if refererOrigin != allowed {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-	} else {
+	if !h.originAllowed(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}

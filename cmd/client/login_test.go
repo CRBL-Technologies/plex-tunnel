@@ -13,15 +13,23 @@ import (
 )
 
 func newTestLoginHandler(auth authConfig, store *sessionStore, limiter *loginRateLimiter) http.Handler {
-	return newUIHandler(newTestUIController(), zerolog.Nop(), auth, store, limiter, "127.0.0.1:9090")
+	return newTestLoginHandlerWithListenAddr(auth, store, limiter, "127.0.0.1:9090")
+}
+
+func newTestLoginHandlerWithListenAddr(auth authConfig, store *sessionStore, limiter *loginRateLimiter, listenAddr string) http.Handler {
+	return newUIHandler(newTestUIController(), zerolog.Nop(), auth, store, limiter, listenAddr)
 }
 
 func newLoginRequest(t *testing.T, target string, form url.Values) *http.Request {
+	return newLoginRequestWithOrigin(t, target, form, "http://127.0.0.1:9090")
+}
+
+func newLoginRequestWithOrigin(t *testing.T, target string, form url.Values, origin string) *http.Request {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Origin", "http://127.0.0.1:9090")
+	req.Header.Set("Origin", origin)
 	return req
 }
 
@@ -381,6 +389,120 @@ func TestLogin_CSRF_RejectBadOrigin(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", "http://evil.test")
 	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestLogin_Origin_BindAll_AcceptsLANHost(t *testing.T) {
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "0.0.0.0:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://192.168.1.50:9090")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+}
+
+func TestLogin_Origin_BindAll_AcceptsHostnameHost(t *testing.T) {
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "0.0.0.0:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://nas.local:9090")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+}
+
+func TestLogin_Origin_BindAll_AcceptsAnyHostWithMatchingPort(t *testing.T) {
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "0.0.0.0:9090")
+	// When the UI binds all interfaces, we accept any host on the active ingress port.
+	// Authentication is still enforced by password; the origin check is secondary.
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://evil.com:9090")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+}
+
+func TestLogin_Origin_BindAll_RejectsPortMismatch(t *testing.T) {
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "0.0.0.0:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://nas.local:8080")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestLogin_Origin_BindAll_IPv6Wildcard(t *testing.T) {
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "[::]:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://nas.local:9090")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+}
+
+func TestLogin_Origin_ConcreteHost_AcceptsExactMatch(t *testing.T) {
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "127.0.0.1:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://127.0.0.1:9090")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+}
+
+func TestLogin_Origin_ConcreteHost_RejectsOtherHost(t *testing.T) {
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "127.0.0.1:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://192.168.1.50:9090")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestLogin_Origin_ExplicitOverride_Accepts(t *testing.T) {
+	t.Setenv("PLEXTUNNEL_UI_ORIGIN", "https://ui.example.com")
+
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "0.0.0.0:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "https://ui.example.com")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+}
+
+func TestLogin_Origin_ExplicitOverride_RejectsMismatch(t *testing.T) {
+	t.Setenv("PLEXTUNNEL_UI_ORIGIN", "https://ui.example.com")
+
+	handler := newTestLoginHandlerWithListenAddr(authConfig{Password: "pw"}, newTestSessionStore(), newLoginRateLimiter(), "0.0.0.0:9090")
+	req := newLoginRequestWithOrigin(t, "/login", url.Values{"password": {"pw"}}, "http://192.168.1.50:9090")
+	rec := httptest.NewRecorder()
+
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusForbidden {
