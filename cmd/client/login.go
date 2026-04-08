@@ -438,18 +438,52 @@ func (h *uiHandler) requireSession(next http.Handler) http.Handler {
 }
 
 func (h *uiHandler) originAllowed(r *http.Request) bool {
-	allowed := h.allowedOrigin
-	if origin := r.Header.Get("Origin"); origin != "" {
-		return origin == allowed
+	scheme, host, ok := requestOrigin(r)
+	if !ok {
+		return false
 	}
-	if referer := r.Header.Get("Referer"); referer != "" {
-		parsed, err := url.Parse(referer)
+
+	origin := scheme + "://" + host
+	if h.originOverride != "" {
+		return origin == h.originOverride
+	}
+
+	if h.bindAll {
+		if scheme != "http" && scheme != "https" {
+			return false
+		}
+		_, port, err := net.SplitHostPort(host)
 		if err != nil {
 			return false
 		}
-		return parsed.Scheme+"://"+parsed.Host == allowed
+		return port == h.listenPort
 	}
-	return false
+
+	if h.listenHost == "" || h.listenPort == "" {
+		return false
+	}
+
+	return origin == "http://"+net.JoinHostPort(h.listenHost, h.listenPort)
+}
+
+func requestOrigin(r *http.Request) (scheme, host string, ok bool) {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return "", "", false
+		}
+		return parsed.Scheme, parsed.Host, true
+	}
+
+	if referer := r.Header.Get("Referer"); referer != "" {
+		parsed, err := url.Parse(referer)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return "", "", false
+		}
+		return parsed.Scheme, parsed.Host, true
+	}
+
+	return "", "", false
 }
 
 func (h *uiHandler) sessionCookie(token string, r *http.Request) *http.Cookie {
