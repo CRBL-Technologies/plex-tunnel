@@ -341,6 +341,76 @@ func TestPoolPromotionPicksOldestIdleData(t *testing.T) {
 	}
 }
 
+func TestPoolRemove_NoBusyPromote(t *testing.T) {
+	pool := newConnectionPool("server", "subdomain", "session", 4)
+	pool.conns[0] = &poolConn{index: 0}
+	pool.conns[1] = &poolConn{index: 1}
+	pool.conns[1].streams.Store(1)
+	pool.conns[2] = &poolConn{index: 2}
+	pool.conns[3] = &poolConn{index: 3}
+	pool.conns[3].streams.Store(1)
+	pool.controlIndex = 0
+
+	remaining, promoted, controlLost := pool.remove(0)
+	if !controlLost {
+		t.Fatal("controlLost = false, want true")
+	}
+	if remaining != 3 {
+		t.Fatalf("remaining = %d, want 3", remaining)
+	}
+	if promoted == nil {
+		t.Fatal("promoted = nil, want slot 2")
+	}
+	if promoted.index != 2 {
+		t.Fatalf("promoted.index = %d, want 2", promoted.index)
+	}
+}
+
+func TestPoolRemove_AllBusyForcesFullReconnect(t *testing.T) {
+	pool := newConnectionPool("server", "subdomain", "session", 3)
+	for i := range pool.conns {
+		pool.conns[i] = &poolConn{index: i}
+		pool.conns[i].streams.Store(1)
+	}
+	pool.controlIndex = 0
+
+	remaining, promoted, controlLost := pool.remove(0)
+	if !controlLost {
+		t.Fatal("controlLost = false, want true")
+	}
+	if promoted != nil {
+		t.Fatalf("promoted = %+v, want nil", promoted)
+	}
+	if remaining != 2 {
+		t.Fatalf("remaining = %d, want 2", remaining)
+	}
+}
+
+func TestPoolRemove_FindsIdleAcrossAllSlots(t *testing.T) {
+	pool := newConnectionPool("server", "subdomain", "session", 6)
+	pool.conns[0] = &poolConn{index: 0}
+	pool.controlIndex = 0
+	for i := 1; i <= 4; i++ {
+		pool.conns[i] = &poolConn{index: i}
+		pool.conns[i].streams.Store(1)
+	}
+	pool.conns[5] = &poolConn{index: 5}
+
+	remaining, promoted, controlLost := pool.remove(0)
+	if !controlLost {
+		t.Fatal("controlLost = false, want true")
+	}
+	if remaining != 5 {
+		t.Fatalf("remaining = %d, want 5", remaining)
+	}
+	if promoted == nil {
+		t.Fatal("promoted = nil, want slot 5")
+	}
+	if promoted.index != 5 {
+		t.Fatalf("promoted.index = %d, want 5", promoted.index)
+	}
+}
+
 func TestPoolResize_ScaleDown_ClosesActiveConnections(t *testing.T) {
 	conn2 := newTestSocketPair(t)
 

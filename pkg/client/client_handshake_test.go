@@ -100,6 +100,90 @@ func TestRegisterAdvertisesLeasedPoolCapability(t *testing.T) {
 	}
 }
 
+func TestClient_RegisterUsesConfiguredMaxConnections(t *testing.T) {
+	tcs := []struct {
+		name              string
+		configuredMaxConn int
+		wantRegisterMax   int
+	}{
+		{name: "server grant default", configuredMaxConn: 0, wantRegisterMax: 0},
+		{name: "explicit override", configuredMaxConn: 11, wantRegisterMax: 11},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			serverErrCh := make(chan error, 1)
+			registerCh := make(chan tunnel.Message, 1)
+
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := tunnel.AcceptWebSocket(w, r)
+				if err != nil {
+					serverErrCh <- err
+					return
+				}
+				defer conn.Close()
+
+				registerMsg, err := conn.Receive()
+				if err != nil {
+					serverErrCh <- err
+					return
+				}
+				registerCh <- registerMsg
+
+				if err := conn.Send(tunnel.Message{
+					Type:            tunnel.MsgRegisterAck,
+					Subdomain:       "myplex",
+					ProtocolVersion: tunnel.ProtocolVersion,
+					SessionID:       "sess-1",
+					MaxConnections:  1,
+					Capabilities:    tunnel.CapLeasedPool,
+				}); err != nil {
+					serverErrCh <- err
+					return
+				}
+
+				drainUntilClose(conn)
+			}))
+			defer srv.Close()
+			withPinnedTLS(t, srv)
+
+			cfg := Config{
+				Token:             "token-123",
+				ServerURL:         toWebSocketURL(srv.URL),
+				PlexTarget:        "http://127.0.0.1:32400",
+				MaxConnections:    tc.configuredMaxConn,
+				PingInterval:      time.Hour,
+				PongTimeout:       time.Hour,
+				MaxReconnectDelay: time.Second,
+				ResponseChunkSize: 1024,
+			}
+
+			c := New(cfg, zerolog.Nop())
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+			defer cancel()
+
+			if err := c.runSession(ctx); err != nil {
+				t.Fatalf("runSession() error = %v", err)
+			}
+
+			select {
+			case registerMsg := <-registerCh:
+				if registerMsg.MaxConnections != tc.wantRegisterMax {
+					t.Fatalf("register max_connections = %d, want %d", registerMsg.MaxConnections, tc.wantRegisterMax)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for register message")
+			}
+
+			select {
+			case err := <-serverErrCh:
+				t.Fatalf("server error: %v", err)
+			default:
+			}
+		})
+	}
+}
+
 func TestRunSessionProtocolVersionMismatchError(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := tunnel.AcceptWebSocket(w, r)

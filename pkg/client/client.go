@@ -176,16 +176,11 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) runSession(ctx context.Context) error {
-	requestedMaxConnections := c.cfg.MaxConnections
-	if requestedMaxConnections < 1 {
-		requestedMaxConnections = 1
-	}
-
 	if strings.HasPrefix(c.cfg.ServerURL, "ws://") {
 		return fmt.Errorf("refusing to connect over unencrypted ws:// — tunnel token would be sent in plaintext; use wss:// instead")
 	}
 
-	controlConn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
+	controlConn, err := tunnel.DialTunnelWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
 		return fmt.Errorf("connect server websocket: %w", err)
 	}
@@ -197,7 +192,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		Token:           c.cfg.Token,
 		Subdomain:       c.cfg.Subdomain,
 		ProtocolVersion: tunnel.ProtocolVersion,
-		MaxConnections:  requestedMaxConnections,
+		MaxConnections:  c.cfg.MaxConnections,
 		Capabilities:    tunnel.CapLeasedPool,
 	}); err != nil {
 		_ = controlConn.Close()
@@ -275,10 +270,16 @@ func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoo
 			// must keep retrying websocket read deadlines while the parent context
 			// is still alive. This avoids the 2026-04-08 staging lane teardown.
 			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				sinceLastPongMs := int64(-1)
+				if lastPong := connRef.lastPong.Load(); lastPong > 0 {
+					sinceLastPongMs = time.Since(time.Unix(0, lastPong)).Milliseconds()
+				}
 				c.logger.Debug().
 					Err(err).
 					Str("session_id", session.pool.sessionID).
 					Int("connection_index", connRef.index).
+					Int64("streams", connRef.streams.Load()).
+					Int64("since_last_pong_ms", sinceLastPongMs).
 					Msg("retrying tunnel connection after read timeout")
 				select {
 				case <-time.After(100 * time.Millisecond):
@@ -702,6 +703,10 @@ func (c *Client) maintainPoolSlot(
 			c.startPoolPingLoop(session.ctx, session, pool, promoted)
 			c.syncPoolStatus(pool)
 		}
+		if controlLost && promoted == nil && remaining > 0 {
+			sendErr(session.errCh, fmt.Errorf("control lost with no idle promotion candidate"))
+			return
+		}
 
 		if remaining == 0 {
 			sendErr(session.errCh, fmt.Errorf("all tunnel connections lost"))
@@ -752,7 +757,7 @@ func (c *Client) startConnPingLoop(ctx context.Context, pool *ConnectionPool, co
 }
 
 func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool) (*tunnel.WebSocketConnection, error) {
-	conn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
+	conn, err := tunnel.DialTunnelWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect session websocket: %w", err)
 	}

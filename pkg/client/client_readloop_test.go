@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,7 +11,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func TestReadLoop_RetriesDeadlineDuringActiveStream(t *testing.T) {
+func TestReadLoop_BusyTunnelSurvivesDeadline(t *testing.T) {
 	client := New(Config{}, zerolog.Nop())
 	session := &sessionPoolController{
 		pool: newConnectionPool("server", "subdomain", "session", 1),
@@ -22,7 +24,7 @@ func TestReadLoop_RetriesDeadlineDuringActiveStream(t *testing.T) {
 		results: []readLoopReceiveResult{
 			{err: context.DeadlineExceeded},
 			{msg: tunnel.Message{Type: tunnel.MsgPong}},
-			{wait: blockedReceive, err: context.DeadlineExceeded},
+			{wait: blockedReceive, err: context.Canceled},
 		},
 	}
 
@@ -43,12 +45,18 @@ func TestReadLoop_RetriesDeadlineDuringActiveStream(t *testing.T) {
 	if connRef.lastPong.Load() == 0 {
 		t.Fatal("expected readLoop to process MsgPong after retrying the read timeout")
 	}
+	if fakeConn.closeCalls.Load() != 0 {
+		t.Fatalf("connection close calls = %d, want 0", fakeConn.closeCalls.Load())
+	}
 
 	cancel()
 	close(blockedReceive)
 
 	select {
-	case <-done:
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("readLoop error = %v, want wrapped context.Canceled", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for readLoop to exit after context cancellation")
 	}
@@ -61,7 +69,8 @@ type readLoopReceiveResult struct {
 }
 
 type scriptedReadLoopConn struct {
-	results []readLoopReceiveResult
+	results    []readLoopReceiveResult
+	closeCalls atomic.Int32
 }
 
 func (c *scriptedReadLoopConn) Send(tunnel.Message) error {
@@ -84,6 +93,7 @@ func (c *scriptedReadLoopConn) Receive() (tunnel.Message, error) {
 }
 
 func (c *scriptedReadLoopConn) Close() error {
+	c.closeCalls.Add(1)
 	return nil
 }
 

@@ -150,13 +150,8 @@ func (p *ConnectionPool) remove(index int) (remaining int, promoted *poolConn, c
 		break
 	}
 	if nextIndex < 0 {
-		for i, connRef := range p.conns {
-			if connRef == nil {
-				continue
-			}
-			nextIndex = i
-			break
-		}
+		p.controlIndex = -1
+		return remaining, nil, true
 	}
 	p.controlIndex = nextIndex
 	if promoted = p.conns[nextIndex]; promoted != nil && promoted.pingCancel != nil {

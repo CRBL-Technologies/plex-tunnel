@@ -16,6 +16,19 @@ func TestLoadConfigDebugBandwidthLog(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDefaultMaxConnections(t *testing.T) {
+	t.Setenv("PLEXTUNNEL_TOKEN", "token")
+	t.Setenv("PLEXTUNNEL_SERVER_URL", "wss://example.test/tunnel")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxConnections != 0 {
+		t.Fatalf("MaxConnections = %d, want 0", cfg.MaxConnections)
+	}
+}
+
 func TestLoadConfigInvalidDebugBandwidthLog(t *testing.T) {
 	t.Setenv("PLEXTUNNEL_TOKEN", "token")
 	t.Setenv("PLEXTUNNEL_SERVER_URL", "wss://example.test/tunnel")
@@ -30,14 +43,14 @@ func TestLoadConfigInvalidDebugBandwidthLog(t *testing.T) {
 func TestLoadConfigMaxConnections(t *testing.T) {
 	t.Setenv("PLEXTUNNEL_TOKEN", "token")
 	t.Setenv("PLEXTUNNEL_SERVER_URL", "wss://example.test/tunnel")
-	t.Setenv("PLEXTUNNEL_MAX_CONNECTIONS", "6")
+	t.Setenv("PLEXTUNNEL_MAX_CONNECTIONS", "8")
 
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.MaxConnections != 6 {
-		t.Fatalf("MaxConnections = %d, want 6", cfg.MaxConnections)
+	if cfg.MaxConnections != 8 {
+		t.Fatalf("MaxConnections = %d, want 8", cfg.MaxConnections)
 	}
 }
 
