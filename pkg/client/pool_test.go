@@ -237,6 +237,44 @@ func TestPoolResize_ScaleDown_PromotesControl(t *testing.T) {
 	}
 }
 
+func TestResizeNeverClosesControl(t *testing.T) {
+	conn0 := newTestSocketPair(t)
+	conn1 := newTestSocketPair(t)
+	conn2 := newTestSocketPair(t)
+	conn3 := newTestSocketPair(t)
+	conn4 := newTestSocketPair(t)
+
+	pool := newConnectionPool("server", "subdomain", "session", 5)
+	pool.conns[0] = &poolConn{conn: conn0.client, index: 0}
+	pool.conns[1] = &poolConn{conn: conn1.client, index: 1}
+	pool.conns[2] = &poolConn{conn: conn2.client, index: 2}
+	pool.conns[3] = &poolConn{conn: conn3.client, index: 3}
+	pool.conns[4] = &poolConn{conn: conn4.client, index: 4}
+	pool.controlIndex = 0
+
+	_, newMax, promoted := pool.Resize(1)
+	if newMax != 1 {
+		t.Fatalf("newMax = %d, want 1", newMax)
+	}
+	if promoted != nil {
+		t.Fatalf("promoted = %+v, want nil", promoted)
+	}
+	if !pool.IsControlSlot(0) {
+		t.Fatal("slot 0 should remain the control slot after resize")
+	}
+
+	waitForClose(t, conn1.closed)
+	waitForClose(t, conn2.closed)
+	waitForClose(t, conn3.closed)
+	waitForClose(t, conn4.closed)
+
+	select {
+	case <-conn0.closed:
+		t.Fatal("control connection was closed during resize")
+	default:
+	}
+}
+
 func TestPoolResize_ClampsBounds(t *testing.T) {
 	pool := newConnectionPool("server", "subdomain", "session", 4)
 
@@ -269,6 +307,37 @@ func TestPoolResize_ClampsBounds(t *testing.T) {
 	}
 	if len(pool.conns) != maxPoolConnections {
 		t.Fatalf("len(pool.conns) = %d, want %d", len(pool.conns), maxPoolConnections)
+	}
+}
+
+func TestPoolPromotionPicksOldestIdleData(t *testing.T) {
+	conn1 := newTestSocketPair(t)
+	conn2 := newTestSocketPair(t)
+	conn3 := newTestSocketPair(t)
+
+	pool := newConnectionPool("server", "subdomain", "session", 4)
+	pool.conns[0] = &poolConn{index: 0}
+	pool.conns[1] = &poolConn{conn: conn1.client, index: 1}
+	pool.conns[2] = &poolConn{conn: conn2.client, index: 2}
+	pool.conns[3] = &poolConn{conn: conn3.client, index: 3}
+	pool.controlIndex = 0
+	pool.conns[1].streams.Store(1)
+
+	remaining, promoted, controlLost := pool.remove(0)
+	if !controlLost {
+		t.Fatal("expected controlLoss when removing slot 0")
+	}
+	if remaining != 3 {
+		t.Fatalf("remaining = %d, want 3", remaining)
+	}
+	if promoted == nil {
+		t.Fatal("promoted = nil, want oldest idle data connection")
+	}
+	if promoted.index != 2 {
+		t.Fatalf("promoted.index = %d, want 2", promoted.index)
+	}
+	if !pool.IsControlSlot(2) {
+		t.Fatal("slot 2 should become the control slot")
 	}
 }
 
