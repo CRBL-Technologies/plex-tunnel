@@ -80,6 +80,130 @@ client**, because server and client both depend on the proto bump.
    represent the *old* total-conn model (1 multiplexed conn). The new model
    has total = `data + 1`. Update plan defaults explicitly under the server
    section below; don't just edit one and forget the others.
+9. **DO NOT skimp on observability.** This is a CEO-level requirement. The
+   leased-pool data plane must be diagnosable from logs alone. See the
+   "Logging discipline" section below — this is a guardrail, not a nice-to-have.
+
+---
+
+## Logging discipline (CEO requirement, applies to S6 / S7 / S8 / S9 and the client)
+
+The CEO has explicitly required that the next bug in this subsystem must be
+**one log search away from a diagnosis**, not require a fresh round of
+logging-fix PRs. Every state transition in the leased-pool data plane MUST
+emit a log line.
+
+Use the existing `r.logger` / `session.logger` / `c.logger` zerolog handles —
+do not introduce a new logger. All log lines MUST carry, where applicable,
+this **standard context bag** as structured fields:
+
+- `subdomain` (tenant)
+- `session_id`
+- `tunnel_id` (= `connRef.index`, or `"control"` for the control conn)
+- `route_class` (`"control"` / `"data"`)
+- `request_id`
+- `path` (URL path, no query string)
+- `method`
+- `tier` (`"free"` / `"pro"` / `"max"`) when known
+- `bytes_in` / `bytes_out` on completion paths
+- `err` (zerolog `Err()` field) on every error path
+
+### Required log lines and levels
+
+**Info-level state transitions** (every one of these MUST have a log line):
+
+- `lease acquired` — when `leaseDataConn` or `leaseControlConn` returns a
+  conn. Include the data-pool idle count after the lease so we can spot
+  exhaustion approaching.
+- `lease released` — when `removePending` releases. Include
+  `lease_hold_ms` and the route class.
+- `tunnel connected` (server-side `runSessionConnection` start) and
+  `tunnel disconnected` (release path). Include the connection role
+  (control / data / promoted).
+- `control promotion triggered` — when the control conn EOFs or the
+  consecutive-keepalive-failure threshold is breached. Include
+  `reason` (`"eof"` / `"keepalive_threshold"`) and the
+  `consecutive_failures` count.
+- `control promotion completed` — when a data conn is transiently
+  promoted to serve as control. Include `promoted_from_index`.
+- `control replacement registered` — when a fresh control conn rejoins
+  and the promoted data conn returns to the data pool.
+- `retry attempt` — when `canRetryIdempotent` returns true and a retry
+  is dispatched. Include `attempt` (always 1 in this PR), the failure
+  reason of the prior attempt, and the new tunnel id.
+- `striping segment dispatched` — per segment, with `segment_index`,
+  `segment_offset`, `segment_size`, `tunnel_id`.
+- `striping segment complete` — per segment, with `bytes`, `duration_ms`,
+  `tunnel_id`. Also log `striping width requested vs granted` once per
+  striped request when the request begins.
+- `pool exhaustion 429` — every time a data-class request returns 429
+  for an exhausted pool. Include the data-pool size, idle count (which
+  will be 0), and tier. This is the load-bearing diagnostic.
+- `sse concurrency 429` — every time a control-class SSE request is
+  rejected for the per-tenant SSE cap. Include the active SSE count and
+  the cap.
+- `pool resize` — when `MsgMaxConnectionsUpdate` or tier change resizes
+  the pool. Include `old_max`, `new_max`, `reason`.
+
+**Warn-level events**:
+
+- `lease acquired with low headroom` — emit when a lease succeeds and
+  the resulting idle data count is `<= 1`. This is a leading indicator
+  of imminent 429s.
+- `keepalive missed` — every individual missed pong (not just the
+  threshold breach). Include `consecutive_failures`.
+- `striping segment retried` — failed segment retried on a fresh tunnel.
+- `unmatched route classified as data` — first occurrence of a path
+  prefix per minute (rate-limit so we don't spam, but emit at least
+  one per new prefix). Include the normalised path.
+
+**Error-level failures** (every failure path MUST log with `err` and the
+full standard context bag):
+
+- `lease acquisition failed` — when `leaseDataConn` returns false for a
+  reason other than "no idle conn" (e.g. session draining, session
+  closed).
+- `tunnel send failed` — every `connRef.conn.Send` error, with the
+  message type that failed.
+- `pending response forwarder error` — drainer-goroutine errors.
+- `striping segment failed permanently` — segment exhausted retries or
+  failed post-commit.
+- `control promotion failed` — promotion machinery hit an unexpected
+  state.
+- `register rejected` — every registration rejection, with the rejection
+  reason already included today (`unsupported protocol version`,
+  `missing CapLeasedPool`, etc.).
+
+### Cardinality discipline
+
+- Never log raw URL paths in metric labels (use the normalised
+  `/library/metadata/:id` form for `unmatchedRouteTotal`).
+- Logging full paths in **log lines** (not metrics) is fine and
+  required — high-cardinality logs are cheap, high-cardinality metrics
+  are not.
+- Use `auth.MaskToken` for any token that ends up in a log line.
+- Do not log request bodies or response bodies. Byte counts only.
+
+### Test coverage for logging
+
+Add at least one assertion per major log line that exercises the
+zerolog hook pattern already used in
+`pkg/server/*_test.go` (find the existing helper via grep — there is one,
+it captures log events to a buffer). Specifically, assert that:
+
+- `TestPoolExhaustionReturns429WithRetryAfter` emits a `pool exhaustion 429`
+  log at info level with the expected fields.
+- `TestSSEConcurrencyCap429` emits an `sse concurrency 429` log.
+- `TestRetryIdempotentBeforeBytesCommitted` emits a `retry attempt` log
+  on the retry.
+- `TestSessionControlConnectionIsolatedUnderDataBackpressure` does NOT
+  emit any error-level logs during the slow-consumer scenario (regression
+  guard against accidentally logging the per-request drainer's intentional
+  pacing as an error).
+
+This logging discipline is **non-negotiable** per the CEO requirement. If
+adding the logging breaks an existing test by changing log output, fix the
+test, do not weaken the logging.
 
 ---
 
