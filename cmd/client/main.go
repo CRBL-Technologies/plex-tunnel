@@ -40,8 +40,14 @@ func main() {
 	controller.Start()
 	defer controller.Stop()
 
-	// Client configuration environment variables are documented at:
-	// https://docs.portless.app/getting-started
+	// Web UI configuration (environment variables):
+	//   PLEXTUNNEL_UI_LISTEN       (default "127.0.0.1:9090") Address for the status/settings UI. Set empty to disable.
+	//   PLEXTUNNEL_UI_PASSWORD     (optional) Login password. Required when UI binds to a non-loopback address.
+	//   PLEXTUNNEL_UI_USERNAME     (optional) Login username. If unset, the login form is password-only.
+	//   PLEXTUNNEL_UI_SESSION_TTL  (default "168h") Session cookie lifetime (Go duration).
+	//   PLEXTUNNEL_UI_ORIGIN       (optional) Override the expected HTTP Origin for CSRF checks (read in ui.go).
+	//
+	// For the full configuration reference see https://docs.portless.app/getting-started
 	uiListen := getenvDefault("PLEXTUNNEL_UI_LISTEN", "127.0.0.1:9090")
 	uiPassword := os.Getenv("PLEXTUNNEL_UI_PASSWORD")
 	uiUsername := strings.TrimSpace(os.Getenv("PLEXTUNNEL_UI_USERNAME"))
