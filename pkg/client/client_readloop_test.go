@@ -62,6 +62,148 @@ func TestReadLoop_BusyTunnelSurvivesDeadline(t *testing.T) {
 	}
 }
 
+func TestTryAcquireStreamSlot_ControlAndDataUseSeparatePools(t *testing.T) {
+	client := New(Config{}, zerolog.Nop())
+
+	if cap(client.dataSem) != maxDataStreams {
+		t.Fatalf("dataSem capacity = %d, want %d", cap(client.dataSem), maxDataStreams)
+	}
+	if cap(client.controlSem) != maxControlStreams {
+		t.Fatalf("controlSem capacity = %d, want %d", cap(client.controlSem), maxControlStreams)
+	}
+
+	releaseControl, ok := client.tryAcquireStreamSlot(true)
+	if !ok {
+		t.Fatalf("tryAcquireStreamSlot(true) ok = %v, want true", ok)
+	}
+	if releaseControl == nil {
+		t.Fatalf("tryAcquireStreamSlot(true) release = nil, want non-nil")
+	}
+
+	releaseData, ok := client.tryAcquireStreamSlot(false)
+	if !ok {
+		t.Fatalf("tryAcquireStreamSlot(false) ok = %v, want true", ok)
+	}
+	if releaseData == nil {
+		t.Fatalf("tryAcquireStreamSlot(false) release = nil, want non-nil")
+	}
+
+	if len(client.controlSem) != 1 {
+		t.Fatalf("controlSem length = %d, want 1", len(client.controlSem))
+	}
+	if len(client.dataSem) != 1 {
+		t.Fatalf("dataSem length = %d, want 1", len(client.dataSem))
+	}
+
+	releaseControl()
+	releaseData()
+
+	if len(client.controlSem) != 0 {
+		t.Fatalf("controlSem length after release = %d, want 0", len(client.controlSem))
+	}
+	if len(client.dataSem) != 0 {
+		t.Fatalf("dataSem length after release = %d, want 0", len(client.dataSem))
+	}
+}
+
+func TestTryAcquireStreamSlot_DataSaturationDoesNotBlockControl(t *testing.T) {
+	client := New(Config{}, zerolog.Nop())
+
+	for i := 0; i < maxDataStreams; i++ {
+		client.dataSem <- struct{}{}
+	}
+
+	release, ok := client.tryAcquireStreamSlot(false)
+	if ok {
+		t.Fatalf("tryAcquireStreamSlot(false) ok = %v, want false", ok)
+	}
+	if release != nil {
+		t.Fatalf("tryAcquireStreamSlot(false) release = non-nil, want nil")
+	}
+
+	release, ok = client.tryAcquireStreamSlot(true)
+	if !ok {
+		t.Fatalf("tryAcquireStreamSlot(true) ok = %v, want true", ok)
+	}
+	if release == nil {
+		t.Fatalf("tryAcquireStreamSlot(true) release = nil, want non-nil")
+	}
+
+	release()
+
+	release, ok = client.tryAcquireStreamSlot(true)
+	if !ok {
+		t.Fatalf("tryAcquireStreamSlot(true) after release ok = %v, want true", ok)
+	}
+	if release == nil {
+		t.Fatalf("tryAcquireStreamSlot(true) after release = nil, want non-nil")
+	}
+	release()
+}
+
+func TestTryAcquireStreamSlot_ControlSaturationDoesNotBlockData(t *testing.T) {
+	client := New(Config{}, zerolog.Nop())
+
+	for i := 0; i < maxControlStreams; i++ {
+		client.controlSem <- struct{}{}
+	}
+
+	release, ok := client.tryAcquireStreamSlot(true)
+	if ok {
+		t.Fatalf("tryAcquireStreamSlot(true) ok = %v, want false", ok)
+	}
+	if release != nil {
+		t.Fatalf("tryAcquireStreamSlot(true) release = non-nil, want nil")
+	}
+
+	release, ok = client.tryAcquireStreamSlot(false)
+	if !ok {
+		t.Fatalf("tryAcquireStreamSlot(false) ok = %v, want true", ok)
+	}
+	if release == nil {
+		t.Fatalf("tryAcquireStreamSlot(false) release = nil, want non-nil")
+	}
+	release()
+}
+
+func TestTryAcquireStreamSlot_ReleaseReturnsSlot(t *testing.T) {
+	client := New(Config{}, zerolog.Nop())
+
+	releaseData, ok := client.tryAcquireStreamSlot(false)
+	if !ok {
+		t.Fatalf("tryAcquireStreamSlot(false) ok = %v, want true", ok)
+	}
+	if releaseData == nil {
+		t.Fatalf("tryAcquireStreamSlot(false) release = nil, want non-nil")
+	}
+	if len(client.dataSem) != 1 {
+		t.Fatalf("dataSem length after acquire = %d, want 1", len(client.dataSem))
+	}
+
+	releaseData()
+
+	if len(client.dataSem) != 0 {
+		t.Fatalf("dataSem length after release = %d, want 0", len(client.dataSem))
+	}
+
+	releaseControl, ok := client.tryAcquireStreamSlot(true)
+	if !ok {
+		t.Fatalf("tryAcquireStreamSlot(true) ok = %v, want true", ok)
+	}
+	if releaseControl == nil {
+		t.Fatalf("tryAcquireStreamSlot(true) release = nil, want non-nil")
+	}
+	if len(client.controlSem) != 1 {
+		t.Fatalf("controlSem length after acquire = %d, want 1", len(client.controlSem))
+	}
+
+	releaseControl()
+
+	if len(client.controlSem) != 0 {
+		t.Fatalf("controlSem length after release = %d, want 0", len(client.controlSem))
+	}
+}
+
 type readLoopReceiveResult struct {
 	msg  tunnel.Message
 	err  error
