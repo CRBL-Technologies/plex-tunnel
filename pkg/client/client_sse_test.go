@@ -90,12 +90,6 @@ func TestHandleHTTPRequest_ProxyTimeoutDoesNotTripCircuitBreaker(t *testing.T) {
 		}
 		flusher.Flush()
 
-		time.Sleep(150 * time.Millisecond)
-		if _, err := fmt.Fprint(w, `{"partial":`); err != nil {
-			return
-		}
-		flusher.Flush()
-
 		<-r.Context().Done()
 	}))
 	defer upstream.Close()
@@ -109,14 +103,24 @@ func TestHandleHTTPRequest_ProxyTimeoutDoesNotTripCircuitBreaker(t *testing.T) {
 	timeoutCtx, cancel := context.WithTimeoutCause(parentCtx, 50*time.Millisecond, errProxyRequestTimeout)
 	defer cancel()
 
-	err := client.handleHTTPRequest(parentCtx, timeoutCtx, nil, &poolConn{
-		conn:  pair.client,
-		index: 0,
-	}, tunnel.Message{
-		ID:     "req-timeout",
-		Method: http.MethodGet,
-		Path:   "/slow",
-	})
+	done := make(chan error, 1)
+	go func() {
+		done <- client.handleHTTPRequest(parentCtx, timeoutCtx, nil, &poolConn{
+			conn:  pair.client,
+			index: 0,
+		}, tunnel.Message{
+			ID:     "req-timeout",
+			Method: http.MethodGet,
+			Path:   "/slow",
+		})
+	}()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for proxy timeout to interrupt blocked body read")
+	}
 	if err == nil {
 		t.Fatal("handleHTTPRequest() error = nil, want timeout error")
 	}
