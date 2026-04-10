@@ -436,9 +436,9 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
       {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     </div>
-    <div style="text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
+  </div>
+  <div style="margin-top:auto;text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
       A <a href="https://crbl.io" style="color:var(--accent);text-decoration:none;font-weight:600;">CRBL Technologies</a> product
-    </div>
   </div>
   <script>
   function fmtTime(s){if(!s||s==="0001-01-01T00:00:00Z")return"-";var d=new Date(s);return d.toISOString().replace("T"," ").slice(0,19)}
