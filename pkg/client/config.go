@@ -17,12 +17,13 @@ func isValidSubdomain(s string) bool {
 }
 
 type Config struct {
-	Token                 string
-	ServerURL             string
-	PlexTarget            string
-	Subdomain             string
-	LogLevel              string
-	DebugBandwidthLog     bool
+	Token             string
+	ServerURL         string
+	PlexTarget        string
+	Subdomain         string
+	LogLevel          string
+	DebugBandwidthLog bool
+	// 0 = let the server grant based on tier. Non-zero pins a requested maximum that the server may clamp down.
 	MaxConnections        int
 	PingInterval          time.Duration
 	PongTimeout           time.Duration
@@ -39,7 +40,7 @@ func LoadConfig() (Config, error) {
 		Subdomain:             strings.TrimSpace(os.Getenv("PLEXTUNNEL_SUBDOMAIN")),
 		LogLevel:              getenvDefault("PLEXTUNNEL_LOG_LEVEL", "info"),
 		DebugBandwidthLog:     false,
-		MaxConnections:        4,
+		MaxConnections:        0,
 		PingInterval:          30 * time.Second,
 		PongTimeout:           10 * time.Second,
 		MaxReconnectDelay:     60 * time.Second,

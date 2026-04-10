@@ -18,10 +18,14 @@ import (
 	"github.com/CRBL-Technologies/plex-tunnel-proto/tunnel"
 )
 
+var errProxyRequestTimeout = errors.New("proxy request timeout")
+
 const (
 	maxConcurrentStreams = 128
 	maxPoolConnections   = 32
 	proxyRequestTimeout  = 5 * time.Minute
+
+	controlKeepaliveFailureThreshold = 3
 )
 
 type Client struct {
@@ -36,11 +40,12 @@ type Client struct {
 }
 
 type sessionPoolController struct {
-	mu     sync.Mutex
-	client *Client
-	ctx    context.Context
-	pool   *ConnectionPool
-	errCh  chan<- error
+	mu                             sync.Mutex
+	client                         *Client
+	ctx                            context.Context
+	pool                           *ConnectionPool
+	errCh                          chan<- error
+	consecutiveControlPingFailures atomic.Int32
 }
 
 func newSessionPoolController(
@@ -78,16 +83,18 @@ func (s *sessionPoolController) resize(newMax int) {
 	}
 
 	s.client.logger.Info().
+		Str("subdomain", s.pool.subdomain).
+		Str("session_id", s.pool.sessionID).
 		Int("old_max_connections", oldMax).
 		Int("new_max_connections", updatedMax).
 		Msg("updated tunnel connection pool size")
 
 	if promoted != nil {
-		s.client.logger.Info().
-			Str("session_id", s.pool.sessionID).
-			Int("connection_index", promoted.index).
+		promotedLogger := s.client.slotLogger(s.pool, promoted.index)
+		promotedLogger.Info().
+			Int("promoted_from_index", promoted.index).
 			Msg("promoted tunnel session control connection")
-		s.client.startPoolPingLoop(s.ctx, s.pool, promoted)
+		s.client.startPoolPingLoop(s.ctx, s, s.pool, promoted)
 	}
 
 	for index := oldMax; index < updatedMax; index++ {
@@ -171,16 +178,11 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) runSession(ctx context.Context) error {
-	requestedMaxConnections := c.cfg.MaxConnections
-	if requestedMaxConnections < 1 {
-		requestedMaxConnections = 1
-	}
-
 	if strings.HasPrefix(c.cfg.ServerURL, "ws://") {
 		return fmt.Errorf("refusing to connect over unencrypted ws:// — tunnel token would be sent in plaintext; use wss:// instead")
 	}
 
-	controlConn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
+	controlConn, err := tunnel.DialTunnelWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
 		return fmt.Errorf("connect server websocket: %w", err)
 	}
@@ -192,7 +194,8 @@ func (c *Client) runSession(ctx context.Context) error {
 		Token:           c.cfg.Token,
 		Subdomain:       c.cfg.Subdomain,
 		ProtocolVersion: tunnel.ProtocolVersion,
-		MaxConnections:  requestedMaxConnections,
+		MaxConnections:  c.cfg.MaxConnections,
+		Capabilities:    tunnel.CapLeasedPool,
 	}); err != nil {
 		_ = controlConn.Close()
 		return fmt.Errorf("Connection failed during handshake. The server may be running an older protocol version. Ensure both client and server are updated. Details: %w", err)
@@ -233,6 +236,8 @@ func (c *Client) runSession(ctx context.Context) error {
 	c.logger.Info().
 		Str("subdomain", registerAck.Subdomain).
 		Str("session_id", registerAck.SessionID).
+		Str("tunnel_id", "control").
+		Str("route_class", "control").
 		Int("max_connections", registerAck.MaxConnections).
 		Msg("client registered")
 
@@ -255,15 +260,29 @@ func (c *Client) runSession(ctx context.Context) error {
 }
 
 func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, connRef *poolConn) error {
+	return c.readLoopWithConnection(ctx, session, connRef, connRef.conn)
+}
+
+func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoolController, connRef *poolConn, conn tunnel.Connection) error {
 	for {
-		msg, err := connRef.conn.Receive()
+		msg, err := conn.Receive()
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) && connRef.streams.Load() == 0 && ctx.Err() == nil {
+			// A quiet Receive during an active stream is not a teardown signal.
+			// Lane health is owned by the pong watchdog in pingLoop, so readLoop
+			// must keep retrying websocket read deadlines while the parent context
+			// is still alive. This avoids the 2026-04-08 staging lane teardown.
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				sinceLastPongMs := int64(-1)
+				if lastPong := connRef.lastPong.Load(); lastPong > 0 {
+					sinceLastPongMs = time.Since(time.Unix(0, lastPong)).Milliseconds()
+				}
 				c.logger.Debug().
 					Err(err).
 					Str("session_id", session.pool.sessionID).
 					Int("connection_index", connRef.index).
-					Msg("retrying idle tunnel connection after read timeout")
+					Int64("streams", connRef.streams.Load()).
+					Int64("since_last_pong_ms", sinceLastPongMs).
+					Msg("retrying tunnel connection after read timeout")
 				select {
 				case <-time.After(100 * time.Millisecond):
 				case <-ctx.Done():
@@ -290,18 +309,22 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 				defer connRef.streams.Add(-1)
 				defer activeStreamsMetric.Dec()
 
-				reqCtx, reqCancel := context.WithTimeout(ctx, proxyRequestTimeout)
+				reqCtx, reqCancel := context.WithTimeoutCause(ctx, proxyRequestTimeout, errProxyRequestTimeout)
 				defer reqCancel()
-				if err := c.handleHTTPRequest(reqCtx, connRef, request); err != nil {
-					c.logger.Warn().Err(err).Str("request_id", request.ID).Msg("failed to process proxied request")
+				if err := c.handleHTTPRequest(ctx, reqCtx, session.pool, connRef, request); err != nil {
+					requestLogger := c.requestLogger(session.pool, connRef, request)
+					requestLogger.Warn().Err(err).Msg("failed to process proxied request")
 				}
 			}(msg)
 		case tunnel.MsgPing:
-			if err := connRef.conn.Send(tunnel.Message{Type: tunnel.MsgPong}); err != nil {
+			if err := conn.Send(tunnel.Message{Type: tunnel.MsgPong}); err != nil {
 				return fmt.Errorf("send pong: %w", err)
 			}
 		case tunnel.MsgPong:
 			connRef.lastPong.Store(time.Now().UnixNano())
+			if session.pool.IsControlSlot(connRef.index) {
+				session.consecutiveControlPingFailures.Store(0)
+			}
 		case tunnel.MsgError:
 			c.logger.Warn().Str("error", msg.Error).Msg("received server error")
 		case tunnel.MsgRegisterAck:
@@ -313,11 +336,11 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 					msg.ProtocolVersion,
 				)
 			}
-			c.logger.Debug().
-				Str("subdomain", msg.Subdomain).
-				Str("session_id", msg.SessionID).
-				Int("connection_index", connRef.index).
-				Msg("received register ack")
+			if msg.Capabilities&tunnel.CapLeasedPool == 0 {
+				return fmt.Errorf("server did not acknowledge leased-pool capability; refusing to use legacy data plane")
+			}
+			ackLogger := c.slotLogger(session.pool, connRef.index)
+			ackLogger.Info().Msg("received register ack")
 		case tunnel.MsgMaxConnectionsUpdate:
 			capped := msg.MaxConnections
 			if capped > maxPoolConnections {
@@ -332,21 +355,36 @@ func (c *Client) readLoop(ctx context.Context, session *sessionPoolController, c
 	}
 }
 
-func (c *Client) pingLoop(ctx context.Context, conn *tunnel.WebSocketConnection, lastPong *atomic.Int64) error {
+func (c *Client) pingLoop(ctx context.Context, conn tunnel.Connection, lastPong *atomic.Int64, consecutiveFailures *atomic.Int32) error {
 	ticker := time.NewTicker(c.cfg.PingInterval)
 	defer ticker.Stop()
 
 	// A pong is expected no later than one full ping interval plus timeout.
 	disconnectAfter := c.cfg.PingInterval + c.cfg.PongTimeout
+	lastObservedPong := lastPong.Load()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			last := time.Unix(0, lastPong.Load())
+			currentLastPong := lastPong.Load()
+			if currentLastPong != lastObservedPong {
+				lastObservedPong = currentLastPong
+				if consecutiveFailures != nil {
+					consecutiveFailures.Store(0)
+				}
+			}
+
+			last := time.Unix(0, currentLastPong)
 			if time.Since(last) > disconnectAfter {
-				return fmt.Errorf("pong timeout exceeded (%s)", disconnectAfter)
+				if consecutiveFailures == nil {
+					return fmt.Errorf("pong timeout exceeded (%s)", disconnectAfter)
+				}
+				failures := consecutiveFailures.Add(1)
+				if failures >= controlKeepaliveFailureThreshold {
+					return fmt.Errorf("control pong timeout exceeded after %d missed pongs (%s)", failures, disconnectAfter)
+				}
 			}
 
 			if err := conn.Send(tunnel.Message{Type: tunnel.MsgPing}); err != nil {
@@ -356,25 +394,26 @@ func (c *Client) pingLoop(ctx context.Context, conn *tunnel.WebSocketConnection,
 	}
 }
 
-func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg tunnel.Message) error {
+func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *ConnectionPool, connRef *poolConn, msg tunnel.Message) error {
 	if msg.ID == "" {
 		return fmt.Errorf("request without id")
 	}
 	conn := connRef.conn
+	requestLogger := c.requestLogger(pool, connRef, msg)
 	if msg.Method == "" && msg.Path == "" {
-		c.logger.Warn().Str("request_id", msg.ID).Msg("rejected continuation request frame (not supported)")
+		requestLogger.Warn().Msg("rejected continuation request frame (not supported)")
 		return c.sendProxyError(conn, msg.ID, http.StatusNotImplemented, "streaming requests not supported")
 	}
 
 	targetURL, err := resolveTargetURL(c.cfg.PlexTarget, msg.Path)
 	if err != nil {
-		c.logger.Warn().Err(err).Str("request_id", msg.ID).Msg("target path resolution failed")
+		requestLogger.Warn().Err(err).Msg("target path resolution failed")
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "bad gateway")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, msg.Method, targetURL, bytes.NewReader(msg.Body))
+	req, err := http.NewRequestWithContext(parentCtx, msg.Method, targetURL, bytes.NewReader(msg.Body))
 	if err != nil {
-		c.logger.Warn().Err(err).Str("request_id", msg.ID).Msg("failed to build proxied request")
+		requestLogger.Warn().Err(err).Msg("failed to build proxied request")
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "bad gateway")
 	}
 
@@ -391,33 +430,68 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 		}
 	}
 	if !c.circuit.Allow() {
-		c.logger.Info().Str("request_id", msg.ID).Msg("rejecting proxied request while circuit breaker is open")
+		requestLogger.Info().Msg("rejecting proxied request while circuit breaker is open")
 		return c.sendProxyError(conn, msg.ID, http.StatusServiceUnavailable, "upstream temporarily unavailable")
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		c.circuit.RecordFailure()
-		c.logger.Warn().Err(err).Str("request_id", msg.ID).Msg("upstream plex request failed")
+		if errors.Is(err, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout {
+			requestLogger.Debug().Err(err).Msg("skipping circuit breaker failure for proxy request timeout")
+		} else {
+			c.circuit.RecordFailure()
+		}
+		requestLogger.Warn().Err(err).Msg("upstream plex request failed")
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "upstream unavailable")
 	}
 	defer resp.Body.Close()
 	upstreamFailure := resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
-
-	requestLogger := c.logger.With().
-		Str("request_id", msg.ID).
-		Str("method", msg.Method).
-		Str("path", msg.Path).
-		Int("connection_index", connRef.index).
-		Logger()
+	isSSE := isEventStreamContentType(resp.Header.Get("Content-Type"))
+	if isSSE {
+		requestLogger.Info().Msg("exempting SSE stream from proxy request timeout")
+	}
 
 	chunk := make([]byte, c.cfg.ResponseChunkSize)
 	headersSent := false
 	chunkIndex := 0
 	for {
 		readStartedAt := time.Now()
-		n, readErr := resp.Body.Read(chunk)
-		readCompletedAt := time.Now()
+		readCompletedAt := readStartedAt
+		var n int
+		var readErr error
+		if isSSE {
+			n, readErr = resp.Body.Read(chunk)
+			readCompletedAt = time.Now()
+		} else {
+			readResultCh := make(chan struct {
+				n           int
+				err         error
+				completedAt time.Time
+			}, 1)
+			go func() {
+				n, err := resp.Body.Read(chunk)
+				readResultCh <- struct {
+					n           int
+					err         error
+					completedAt time.Time
+				}{
+					n:           n,
+					err:         err,
+					completedAt: time.Now(),
+				}
+			}()
+
+			select {
+			case readResult := <-readResultCh:
+				n = readResult.n
+				readErr = readResult.err
+				readCompletedAt = readResult.completedAt
+			case <-timeoutCtx.Done():
+				requestLogger.Debug().Err(context.Cause(timeoutCtx)).Msg("skipping circuit breaker failure for proxy request timeout")
+				_ = resp.Body.Close()
+				return fmt.Errorf("read proxied response body: %w", context.Cause(timeoutCtx))
+			}
+		}
 		if n > 0 {
 			responseMsg := tunnel.Message{
 				Type: tunnel.MsgHTTPResponse,
@@ -463,7 +537,11 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 			break
 		}
 		if readErr != nil {
-			c.circuit.RecordFailure()
+			if errors.Is(readErr, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout {
+				requestLogger.Debug().Err(readErr).Msg("skipping circuit breaker failure for proxy request timeout")
+			} else {
+				c.circuit.RecordFailure()
+			}
 			return fmt.Errorf("read proxied response body: %w", readErr)
 		}
 	}
@@ -511,6 +589,31 @@ func (c *Client) handleHTTPRequest(ctx context.Context, connRef *poolConn, msg t
 	return nil
 }
 
+func (c *Client) requestLogger(pool *ConnectionPool, connRef *poolConn, msg tunnel.Message) zerolog.Logger {
+	logger := c.slotLogger(pool, connRef.index).With().
+		Str("request_id", msg.ID).
+		Str("path", msg.Path).
+		Str("method", msg.Method)
+	return logger.Logger()
+}
+
+func (c *Client) slotLogger(pool *ConnectionPool, index int) zerolog.Logger {
+	logger := c.logger.With()
+	if pool != nil {
+		logger = logger.Str("subdomain", pool.subdomain).
+			Str("session_id", pool.sessionID)
+	}
+	routeClass := "data"
+	tunnelID := fmt.Sprintf("%d", index)
+	if pool != nil && pool.IsControlSlot(index) {
+		routeClass = "control"
+		tunnelID = "control"
+	}
+	logger = logger.Str("tunnel_id", tunnelID).
+		Str("route_class", routeClass)
+	return logger.Logger()
+}
+
 func (c *Client) sendProxyError(conn *tunnel.WebSocketConnection, requestID string, status int, msg string) error {
 	errMsg := tunnel.Message{
 		Type:   tunnel.MsgHTTPResponse,
@@ -547,6 +650,10 @@ func resolveTargetURL(baseTarget string, path string) (string, error) {
 	}
 
 	return base.ResolveReference(rel).String(), nil
+}
+
+func isEventStreamContentType(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
 }
 
 func sendErr(errCh chan<- error, err error) {
@@ -593,12 +700,8 @@ func (c *Client) maintainPoolSlot(
 
 				delay := BackoffDelay(attempt, poolRepairMaxLag)
 				attempt++
-				c.logger.Warn().
-					Err(err).
-					Str("session_id", pool.sessionID).
-					Int("connection_index", index).
-					Dur("retry_in", delay).
-					Msg("failed to connect tunnel session slot")
+				slotLogger := c.slotLogger(pool, index)
+				slotLogger.Warn().Err(err).Dur("retry_in", delay).Msg("failed to connect tunnel session slot")
 
 				select {
 				case <-time.After(delay):
@@ -623,28 +726,21 @@ func (c *Client) maintainPoolSlot(
 		c.syncPoolStatus(pool)
 
 		if isControl {
-			c.startPoolPingLoop(session.ctx, pool, connRef)
+			c.startPoolPingLoop(session.ctx, session, pool, connRef)
 		} else {
 			c.startConnPingLoop(ctx, pool, connRef)
 		}
 
-		c.logger.Info().
-			Str("session_id", pool.sessionID).
-			Int("connection_index", index).
-			Bool("control", isControl).
-			Msg("tunnel session connection active")
+		slotLogger := c.slotLogger(pool, index)
+		slotLogger.Info().Msg("tunnel session connection active")
 
 		err := c.readLoop(ctx, session, connRef)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
-			c.logger.Warn().
-				Err(err).
-				Str("session_id", pool.sessionID).
-				Int("connection_index", index).
-				Bool("control", isControl).
-				Msg("tunnel session connection disconnected")
+			slotLogger := c.slotLogger(pool, index)
+			slotLogger.Warn().Err(err).Msg("tunnel session connection disconnected")
 		}
 
 		remaining, promoted, controlLost := pool.remove(index)
@@ -652,12 +748,16 @@ func (c *Client) maintainPoolSlot(
 		_ = connRef.conn.Close()
 
 		if controlLost && promoted != nil {
-			c.logger.Info().
-				Str("session_id", pool.sessionID).
-				Int("connection_index", promoted.index).
+			promotedLogger := c.slotLogger(pool, promoted.index)
+			promotedLogger.Info().
+				Int("promoted_from_index", promoted.index).
 				Msg("promoted tunnel session control connection")
-			c.startPoolPingLoop(session.ctx, pool, promoted)
+			c.startPoolPingLoop(session.ctx, session, pool, promoted)
 			c.syncPoolStatus(pool)
+		}
+		if controlLost && promoted == nil && remaining > 0 {
+			sendErr(session.errCh, fmt.Errorf("control lost with no idle promotion candidate"))
+			return
 		}
 
 		if remaining == 0 {
@@ -676,17 +776,18 @@ func (c *Client) maintainPoolSlot(
 	}
 }
 
-func (c *Client) startPoolPingLoop(ctx context.Context, pool *ConnectionPool, connRef *poolConn) {
+func (c *Client) startPoolPingLoop(ctx context.Context, session *sessionPoolController, pool *ConnectionPool, connRef *poolConn) {
 	pingCtx, cancel := context.WithCancel(ctx)
 	pool.replacePingLoop(cancel)
 	connRef.lastPong.Store(time.Now().UnixNano())
+	session.consecutiveControlPingFailures.Store(0)
 
 	go func() {
-		if err := c.pingLoop(pingCtx, connRef.conn, &connRef.lastPong); err != nil && pingCtx.Err() == nil {
-			c.logger.Warn().
+		if err := c.pingLoop(pingCtx, connRef.conn, &connRef.lastPong, &session.consecutiveControlPingFailures); err != nil && pingCtx.Err() == nil {
+			slotLogger := c.slotLogger(pool, connRef.index)
+			slotLogger.Warn().
 				Err(err).
-				Str("session_id", pool.sessionID).
-				Int("connection_index", connRef.index).
+				Int32("consecutive_failures", session.consecutiveControlPingFailures.Load()).
 				Msg("control connection ping loop failed")
 			_ = connRef.conn.Close()
 		}
@@ -699,18 +800,16 @@ func (c *Client) startConnPingLoop(ctx context.Context, pool *ConnectionPool, co
 	connRef.lastPong.Store(time.Now().UnixNano())
 
 	go func() {
-		if err := c.pingLoop(pingCtx, connRef.conn, &connRef.lastPong); err != nil && pingCtx.Err() == nil {
-			c.logger.Warn().
-				Err(err).
-				Int("connection_index", connRef.index).
-				Msg("connection ping loop failed")
+		if err := c.pingLoop(pingCtx, connRef.conn, &connRef.lastPong, nil); err != nil && pingCtx.Err() == nil {
+			slotLogger := c.slotLogger(pool, connRef.index)
+			slotLogger.Warn().Err(err).Msg("connection ping loop failed")
 			_ = connRef.conn.Close()
 		}
 	}()
 }
 
 func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool) (*tunnel.WebSocketConnection, error) {
-	conn, err := tunnel.DialWebSocket(ctx, c.cfg.ServerURL, nil)
+	conn, err := tunnel.DialTunnelWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect session websocket: %w", err)
 	}
@@ -721,6 +820,7 @@ func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool
 		Subdomain:       pool.subdomain,
 		ProtocolVersion: tunnel.ProtocolVersion,
 		SessionID:       pool.sessionID,
+		Capabilities:    tunnel.CapLeasedPool,
 	}
 	if err := conn.Send(register); err != nil {
 		_ = conn.Close()
@@ -782,6 +882,9 @@ func validateRegisterAck(registerAck tunnel.Message) error {
 			tunnel.ProtocolVersion,
 			registerAck.ProtocolVersion,
 		)
+	}
+	if registerAck.Capabilities&tunnel.CapLeasedPool == 0 {
+		return fmt.Errorf("server did not acknowledge leased-pool capability; refusing to use legacy data plane")
 	}
 	if err := registerAck.Validate(); err != nil {
 		return fmt.Errorf("server returned invalid register ack: %w", err)

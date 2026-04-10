@@ -56,6 +56,8 @@ func newConnectionPool(server, subdomain, sessionID string, maxConns int) *Conne
 	}
 }
 
+// add installs a connection in its assigned slot. On cold start, the first
+// active connection becomes the control slot until failover updates controlIndex.
 func (p *ConnectionPool) add(index int, conn *tunnel.WebSocketConnection) (*poolConn, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -77,6 +79,13 @@ func (p *ConnectionPool) add(index int, conn *tunnel.WebSocketConnection) (*pool
 		p.controlIndex = index
 	}
 	return connRef, index == p.controlIndex
+}
+
+func (p *ConnectionPool) IsControlSlot(index int) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return index >= 0 && index < len(p.conns) && index == p.controlIndex && p.conns[index] != nil
 }
 
 func (p *ConnectionPool) setConnPingCancel(index int, cancel context.CancelFunc) {
@@ -134,11 +143,15 @@ func (p *ConnectionPool) remove(index int) (remaining int, promoted *poolConn, c
 
 	nextIndex := -1
 	for i, connRef := range p.conns {
-		if connRef == nil {
+		if connRef == nil || connRef.streams.Load() != 0 {
 			continue
 		}
 		nextIndex = i
 		break
+	}
+	if nextIndex < 0 {
+		p.controlIndex = -1
+		return remaining, nil, true
 	}
 	p.controlIndex = nextIndex
 	if promoted = p.conns[nextIndex]; promoted != nil && promoted.pingCancel != nil {

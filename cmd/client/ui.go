@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"html/template"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -125,10 +125,16 @@ func (c *clientController) Snapshot() (client.Config, client.ConnectionStatus) {
 }
 
 type uiHandler struct {
-	controller    *clientController
-	logger        zerolog.Logger
-	listenAddr    string
-	allowedOrigin string
+	controller     *clientController
+	logger         zerolog.Logger
+	listenAddr     string
+	originOverride string
+	listenHost     string
+	listenPort     string
+	bindAll        bool
+	auth           authConfig
+	sessions       *sessionStore
+	loginLimiter   *loginRateLimiter
 }
 
 type statusPageData struct {
@@ -173,12 +179,14 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     * { box-sizing: border-box; }
     body {
       margin: 0;
+      display: flex;
+      flex-direction: column;
       font-family: system-ui, -apple-system, sans-serif;
       color: var(--text);
       background: var(--bg);
       min-height: 100vh;
     }
-    .wrap { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+    .wrap { flex: 1; max-width: 960px; margin: 24px auto; padding: 0 16px; }
     .panel {
       background: var(--card);
       border: 1px solid var(--border);
@@ -300,6 +308,18 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       transition: background-color .12s ease-in-out;
     }
     button:hover { background: var(--accent-hover); }
+    .panel-header {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 8px;
+    }
+    .logout-form {
+      display: block;
+    }
+    .logout-button {
+      padding: 6px 10px;
+      font-size: .85rem;
+    }
     .msg { margin-top: 10px; font-size: .9rem; color: var(--ok-text); }
     .err { margin-top: 10px; font-size: .9rem; color: var(--bad-text); }
     @media (max-width: 700px) {
@@ -310,6 +330,11 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 <body>
   <div class="wrap">
     <div class="panel">
+      <div class="panel-header">
+        <form method="post" action="/logout" class="logout-form">
+          <button type="submit" class="logout-button">Sign out</button>
+        </form>
+      </div>
       <div style="text-align:center;margin-bottom:0.75rem;">
         <svg width="48" height="48" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" aria-label="Portless">
           <rect width="36" height="36" rx="8" fill="#1C1917"/>
@@ -411,9 +436,9 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
       {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     </div>
-  </div>
-  <div style="text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
-    A <a href="https://crbl.io" style="color:var(--accent);text-decoration:none;font-weight:600;">CRBL Technologies</a> product
+    <div style="text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
+      A <a href="https://crbl.io" style="color:var(--accent);text-decoration:none;font-weight:600;">CRBL Technologies</a> product
+    </div>
   </div>
   <script>
   function fmtTime(s){if(!s||s==="0001-01-01T00:00:00Z")return"-";var d=new Date(s);return d.toISOString().replace("T"," ").slice(0,19)}
@@ -438,22 +463,43 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
 </body>
 </html>`))
 
-func newUIHandler(controller *clientController, logger zerolog.Logger, password, listenAddr string) http.Handler {
-	allowedOrigin := os.Getenv("PLEXTUNNEL_UI_ORIGIN")
-	if allowedOrigin == "" {
-		allowedOrigin = "http://" + listenAddr
+func newUIHandler(controller *clientController, logger zerolog.Logger, auth authConfig, sessions *sessionStore, loginLimiter *loginRateLimiter, listenAddr string) http.Handler {
+	originOverride := os.Getenv("PLEXTUNNEL_UI_ORIGIN")
+	listenHost, listenPort, err := net.SplitHostPort(listenAddr)
+	bindAll := false
+	if err != nil {
+		if originOverride == "" {
+			originOverride = "http://" + listenAddr
+		}
+	} else {
+		bindAll = isBindAllHost(listenHost)
+	}
+	if sessions == nil {
+		sessions = newSessionStore(7 * 24 * time.Hour)
+	}
+	if loginLimiter == nil {
+		loginLimiter = newLoginRateLimiter()
 	}
 	h := &uiHandler{
-		controller:    controller,
-		logger:        logger,
-		listenAddr:    listenAddr,
-		allowedOrigin: allowedOrigin,
+		controller:     controller,
+		logger:         logger,
+		listenAddr:     listenAddr,
+		originOverride: originOverride,
+		listenHost:     listenHost,
+		listenPort:     listenPort,
+		bindAll:        bindAll,
+		auth:           auth,
+		sessions:       sessions,
+		loginLimiter:   loginLimiter,
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", h.handleIndex)
-	mux.HandleFunc("/settings", h.handleSettings)
-	mux.HandleFunc("/api/status", h.handleStatus)
+	mux.Handle("GET /login", http.HandlerFunc(h.handleLoginGet))
+	mux.Handle("POST /login", http.HandlerFunc(h.handleLoginPost))
+	mux.Handle("POST /logout", http.HandlerFunc(h.handleLogoutPost))
+	mux.Handle("GET /{$}", h.requireSession(http.HandlerFunc(h.handleIndex)))
+	mux.Handle("POST /settings", h.requireSession(http.HandlerFunc(h.handleSettings)))
+	mux.Handle("GET /api/status", h.requireSession(http.HandlerFunc(h.handleStatus)))
 	mux.Handle("/metrics", promhttp.HandlerFor(client.MetricsRegistry, promhttp.HandlerOpts{}))
 
 	// Wrap with security headers.
@@ -464,20 +510,16 @@ func newUIHandler(controller *clientController, logger zerolog.Logger, password,
 		mux.ServeHTTP(w, r)
 	})
 
-	if password == "" {
-		return secured
+	return secured
+}
+
+func isBindAllHost(host string) bool {
+	switch strings.TrimSpace(host) {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	default:
+		return false
 	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username, providedPassword, ok := r.BasicAuth()
-		if !ok || username != "admin" || subtle.ConstantTimeCompare([]byte(providedPassword), []byte(password)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Portless Client"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		secured.ServeHTTP(w, r)
-	})
 }
 
 func (h *uiHandler) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -514,24 +556,7 @@ func (h *uiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowed := h.allowedOrigin
-	if origin := r.Header.Get("Origin"); origin != "" {
-		if origin != allowed {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-	} else if referer := r.Header.Get("Referer"); referer != "" {
-		parsed, err := url.Parse(referer)
-		if err != nil {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		refererOrigin := parsed.Scheme + "://" + parsed.Host
-		if refererOrigin != allowed {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-	} else {
+	if !h.originAllowed(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}

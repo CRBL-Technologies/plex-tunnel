@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -23,10 +24,37 @@ func newTestUIController() *clientController {
 	}, zerolog.Nop())
 }
 
+func newTestSessionStore() *sessionStore {
+	return newSessionStore(7 * 24 * time.Hour)
+}
+
+func addAuthenticatedSession(t *testing.T, req *http.Request, store *sessionStore) {
+	t.Helper()
+
+	token, err := store.Create()
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	req.AddCookie(&http.Cookie{
+		Name:  sessionCookieName,
+		Value: token,
+	})
+}
+
 func TestUIHandler_IndexPage(t *testing.T) {
-	handler := newUIHandler(newTestUIController(), zerolog.Nop(), "", "127.0.0.1:9090")
+	store := newTestSessionStore()
+	handler := newUIHandler(
+		newTestUIController(),
+		zerolog.Nop(),
+		authConfig{Password: "secret"},
+		store,
+		newLoginRateLimiter(),
+		"127.0.0.1:9090",
+	)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	addAuthenticatedSession(t, req, store)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -39,9 +67,18 @@ func TestUIHandler_IndexPage(t *testing.T) {
 }
 
 func TestUIHandler_StatusAPI(t *testing.T) {
-	handler := newUIHandler(newTestUIController(), zerolog.Nop(), "", "127.0.0.1:9090")
+	store := newTestSessionStore()
+	handler := newUIHandler(
+		newTestUIController(),
+		zerolog.Nop(),
+		authConfig{Password: "secret"},
+		store,
+		newLoginRateLimiter(),
+		"127.0.0.1:9090",
+	)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	addAuthenticatedSession(t, req, store)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -61,32 +98,20 @@ func TestUIHandler_StatusAPI(t *testing.T) {
 	}
 }
 
-func TestUIHandler_PasswordProtected(t *testing.T) {
-	handler := newUIHandler(newTestUIController(), zerolog.Nop(), "secret", "127.0.0.1:9090")
-
-	unauthorizedReq := httptest.NewRequest(http.MethodGet, "/", nil)
-	unauthorizedRec := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorizedRec, unauthorizedReq)
-
-	if unauthorizedRec.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthorized status = %d, want %d", unauthorizedRec.Code, http.StatusUnauthorized)
-	}
-
-	authorizedReq := httptest.NewRequest(http.MethodGet, "/", nil)
-	authorizedReq.SetBasicAuth("admin", "secret")
-	authorizedRec := httptest.NewRecorder()
-	handler.ServeHTTP(authorizedRec, authorizedReq)
-
-	if authorizedRec.Code != http.StatusOK {
-		t.Fatalf("authorized status = %d, want %d", authorizedRec.Code, http.StatusOK)
-	}
-}
-
 func TestUIHandler_SettingsCSRFRejectsNoOrigin(t *testing.T) {
-	handler := newUIHandler(newTestUIController(), zerolog.Nop(), "", "127.0.0.1:9090")
+	store := newTestSessionStore()
+	handler := newUIHandler(
+		newTestUIController(),
+		zerolog.Nop(),
+		authConfig{Password: "secret"},
+		store,
+		newLoginRateLimiter(),
+		"127.0.0.1:9090",
+	)
 
 	req := httptest.NewRequest(http.MethodPost, "/settings", strings.NewReader("server_url=wss://example.test/tunnel"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	addAuthenticatedSession(t, req, store)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

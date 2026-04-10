@@ -1,5 +1,5 @@
-github.com/CRBL-Technologies/plex-tunnel-proto v1.2.0 h1:/q8nncp6JTzKHmZo0sesd6J1IJ1FOk837gwA878mxyk=
-github.com/CRBL-Technologies/plex-tunnel-proto v1.2.0/go.mod h1:hDF8RIUMZkW/kwHcZpcgUuRrA55+8H7o958rSfpzUrs=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.2.1-0.20260409133330-26cce9d1c35e h1:c7NF4YHrIHMA6/r77rCY86pZbiuD/Ppz2ZvyQ+y8SUI=
+github.com/CRBL-Technologies/plex-tunnel-proto v1.2.1-0.20260409133330-26cce9d1c35e/go.mod h1:hDF8RIUMZkW/kwHcZpcgUuRrA55+8H7o958rSfpzUrs=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
