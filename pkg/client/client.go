@@ -18,6 +18,8 @@ import (
 	"github.com/CRBL-Technologies/plex-tunnel-proto/tunnel"
 )
 
+var errProxyRequestTimeout = errors.New("proxy request timeout")
+
 const (
 	maxConcurrentStreams = 128
 	maxPoolConnections   = 32
@@ -307,9 +309,9 @@ func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoo
 				defer connRef.streams.Add(-1)
 				defer activeStreamsMetric.Dec()
 
-				reqCtx, reqCancel := context.WithTimeout(ctx, proxyRequestTimeout)
+				reqCtx, reqCancel := context.WithTimeoutCause(ctx, proxyRequestTimeout, errProxyRequestTimeout)
 				defer reqCancel()
-				if err := c.handleHTTPRequest(reqCtx, session.pool, connRef, request); err != nil {
+				if err := c.handleHTTPRequest(ctx, reqCtx, session.pool, connRef, request); err != nil {
 					requestLogger := c.requestLogger(session.pool, connRef, request)
 					requestLogger.Warn().Err(err).Msg("failed to process proxied request")
 				}
@@ -392,7 +394,7 @@ func (c *Client) pingLoop(ctx context.Context, conn tunnel.Connection, lastPong 
 	}
 }
 
-func (c *Client) handleHTTPRequest(ctx context.Context, pool *ConnectionPool, connRef *poolConn, msg tunnel.Message) error {
+func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *ConnectionPool, connRef *poolConn, msg tunnel.Message) error {
 	if msg.ID == "" {
 		return fmt.Errorf("request without id")
 	}
@@ -409,7 +411,7 @@ func (c *Client) handleHTTPRequest(ctx context.Context, pool *ConnectionPool, co
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "bad gateway")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, msg.Method, targetURL, bytes.NewReader(msg.Body))
+	req, err := http.NewRequestWithContext(parentCtx, msg.Method, targetURL, bytes.NewReader(msg.Body))
 	if err != nil {
 		requestLogger.Warn().Err(err).Msg("failed to build proxied request")
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "bad gateway")
@@ -434,17 +436,33 @@ func (c *Client) handleHTTPRequest(ctx context.Context, pool *ConnectionPool, co
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		c.circuit.RecordFailure()
+		if errors.Is(err, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout {
+			requestLogger.Debug().Err(err).Msg("skipping circuit breaker failure for proxy request timeout")
+		} else {
+			c.circuit.RecordFailure()
+		}
 		requestLogger.Warn().Err(err).Msg("upstream plex request failed")
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "upstream unavailable")
 	}
 	defer resp.Body.Close()
 	upstreamFailure := resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
+	isSSE := isEventStreamContentType(resp.Header.Get("Content-Type"))
+	if isSSE {
+		requestLogger.Info().Msg("exempting SSE stream from proxy request timeout")
+	}
 
 	chunk := make([]byte, c.cfg.ResponseChunkSize)
 	headersSent := false
 	chunkIndex := 0
 	for {
+		if !isSSE {
+			select {
+			case <-timeoutCtx.Done():
+				return fmt.Errorf("read proxied response body: %w", context.Cause(timeoutCtx))
+			default:
+			}
+		}
+
 		readStartedAt := time.Now()
 		n, readErr := resp.Body.Read(chunk)
 		readCompletedAt := time.Now()
@@ -493,7 +511,11 @@ func (c *Client) handleHTTPRequest(ctx context.Context, pool *ConnectionPool, co
 			break
 		}
 		if readErr != nil {
-			c.circuit.RecordFailure()
+			if errors.Is(readErr, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout {
+				requestLogger.Debug().Err(readErr).Msg("skipping circuit breaker failure for proxy request timeout")
+			} else {
+				c.circuit.RecordFailure()
+			}
 			return fmt.Errorf("read proxied response body: %w", readErr)
 		}
 	}
@@ -602,6 +624,10 @@ func resolveTargetURL(baseTarget string, path string) (string, error) {
 	}
 
 	return base.ResolveReference(rel).String(), nil
+}
+
+func isEventStreamContentType(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
 }
 
 func sendErr(errCh chan<- error, err error) {
