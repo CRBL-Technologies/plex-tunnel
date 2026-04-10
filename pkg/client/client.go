@@ -21,9 +21,15 @@ import (
 var errProxyRequestTimeout = errors.New("proxy request timeout")
 
 const (
-	maxConcurrentStreams = 128
-	maxPoolConnections   = 32
-	proxyRequestTimeout  = 5 * time.Minute
+	// maxDataStreams caps concurrent data-path requests (downloads, media).
+	// Preserves the pre-split 128-slot capacity for downloads.
+	maxDataStreams = 128
+	// maxControlStreams caps concurrent control-path requests (browsing,
+	// SSE, metadata). Kept small but generous - the long-lived SSE stream
+	// occupies one slot and browsing bursts are typically <20 concurrent.
+	maxControlStreams   = 32
+	maxPoolConnections  = 32
+	proxyRequestTimeout = 5 * time.Minute
 
 	controlKeepaliveFailureThreshold = 3
 )
@@ -34,9 +40,10 @@ type Client struct {
 	client  *http.Client
 	circuit *circuitBreaker
 
-	streamSem chan struct{}
-	stateMu   sync.RWMutex
-	state     ConnectionStatus
+	dataSem    chan struct{}
+	controlSem chan struct{}
+	stateMu    sync.RWMutex
+	state      ConnectionStatus
 }
 
 type sessionPoolController struct {
@@ -120,8 +127,9 @@ func New(cfg Config, logger zerolog.Logger) *Client {
 				ResponseHeaderTimeout: cfg.ResponseHeaderTimeout,
 			},
 		},
-		circuit:   newCircuitBreaker(circuitBreakerDefaultThreshold, circuitBreakerDefaultCooldown, logger),
-		streamSem: make(chan struct{}, maxConcurrentStreams),
+		circuit:    newCircuitBreaker(circuitBreakerDefaultThreshold, circuitBreakerDefaultCooldown, logger),
+		dataSem:    make(chan struct{}, maxDataStreams),
+		controlSem: make(chan struct{}, maxControlStreams),
 	}
 }
 
@@ -295,15 +303,22 @@ func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoo
 
 		switch msg.Type {
 		case tunnel.MsgHTTPRequest:
-			select {
-			case c.streamSem <- struct{}{}:
-			default:
-				c.logger.Warn().Str("request_id", msg.ID).Msg("concurrent stream limit reached, rejecting request")
+			isControl := session.pool.IsControlSlot(connRef.index)
+			release, ok := c.tryAcquireStreamSlot(isControl)
+			if !ok {
+				routeClass := "data"
+				if isControl {
+					routeClass = "control"
+				}
+				c.logger.Warn().
+					Str("request_id", msg.ID).
+					Str("route_class", routeClass).
+					Msg("concurrent stream limit reached, rejecting request")
 				_ = c.sendProxyError(connRef.conn, msg.ID, http.StatusServiceUnavailable, "client overloaded")
 				continue
 			}
 			go func(request tunnel.Message) {
-				defer func() { <-c.streamSem }()
+				defer release()
 				connRef.streams.Add(1)
 				activeStreamsMetric.Inc()
 				defer connRef.streams.Add(-1)
@@ -638,6 +653,27 @@ func (c *Client) sendProxyError(conn *tunnel.WebSocketConnection, requestID stri
 	}
 	observeProxyResponse(status)
 	return nil
+}
+
+// tryAcquireStreamSlot attempts to take a slot from the control or data
+// stream semaphore. Control-lane traffic (browsing, SSE, metadata) is
+// gated by controlSem; all other traffic is gated by dataSem. A saturated
+// dataSem MUST NOT block controlSem, which is the entire point of the
+// split - see #89.
+//
+// On success, returns a release func that MUST be called exactly once
+// when the request completes. On saturation, returns (nil, false).
+func (c *Client) tryAcquireStreamSlot(isControl bool) (release func(), ok bool) {
+	sem := c.dataSem
+	if isControl {
+		sem = c.controlSem
+	}
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, true
+	default:
+		return nil, false
+	}
 }
 
 func resolveTargetURL(baseTarget string, path string) (string, error) {
