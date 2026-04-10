@@ -133,6 +133,72 @@ func TestHandleHTTPRequest_ProxyTimeoutDoesNotTripCircuitBreaker(t *testing.T) {
 	assertNoAsyncError(t, serverErrCh)
 }
 
+func TestHandleHTTPRequest_ParentCtxCancelDuringSSEDoesNotTripCircuitBreaker(t *testing.T) {
+	serverErrCh := make(chan error, 1)
+	blockStream := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			sendTestErr(serverErrCh, "response writer does not support flushing")
+			return
+		}
+
+		if _, err := fmt.Fprint(w, "data: hello\n\n"); err != nil {
+			return
+		}
+		flusher.Flush()
+
+		select {
+		case <-blockStream:
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+
+	pair := newTunnelMessagePair(t)
+	collector := startTunnelMessageCollector(pair.server)
+	defer collector.stop(t, pair.client)
+
+	client := newHandleHTTPRequestTestClient(upstream.URL)
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	timeoutCtx, cancelTimeout := context.WithTimeoutCause(parentCtx, 5*time.Second, errProxyRequestTimeout)
+	defer cancelTimeout()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.handleHTTPRequest(parentCtx, timeoutCtx, nil, &poolConn{
+			conn:  pair.client,
+			index: 0,
+		}, tunnel.Message{
+			ID:     "req-parent-cancel",
+			Method: http.MethodGet,
+			Path:   "/events",
+		})
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancelParent()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for parent context cancellation to interrupt SSE stream")
+	}
+	if err == nil {
+		t.Fatal("handleHTTPRequest() error = nil, want context canceled")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("handleHTTPRequest() error = %v, want wrapped context.Canceled", err)
+	}
+	if client.circuit.stateValue() != circuitStateClosed {
+		t.Fatalf("circuit state = %q, want %q", client.circuit.stateValue(), circuitStateClosed)
+	}
+	assertNoAsyncError(t, serverErrCh)
+}
+
 func TestHandleHTTPRequest_RealUpstreamFailureStillTripsCircuitBreaker(t *testing.T) {
 	serverErrCh := make(chan error, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

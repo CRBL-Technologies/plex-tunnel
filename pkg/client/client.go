@@ -436,8 +436,12 @@ func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		if errors.Is(err, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout {
-			requestLogger.Debug().Err(err).Msg("skipping circuit breaker failure for proxy request timeout")
+		if errors.Is(err, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout || parentCtx.Err() != nil {
+			if parentCtx.Err() != nil {
+				requestLogger.Debug().Err(err).Msg("skipping circuit breaker failure for parent context cancellation")
+			} else {
+				requestLogger.Debug().Err(err).Msg("skipping circuit breaker failure for proxy request timeout")
+			}
 		} else {
 			c.circuit.RecordFailure()
 		}
@@ -511,7 +515,11 @@ func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *
 			}
 			if err != nil {
 				if upstreamFailure {
-					c.circuit.RecordFailure()
+					if parentCtx.Err() != nil {
+						requestLogger.Debug().Err(err).Msg("skipping circuit breaker failure for parent context cancellation")
+					} else {
+						c.circuit.RecordFailure()
+					}
 				} else {
 					c.circuit.RecordSuccess()
 				}
@@ -537,8 +545,12 @@ func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *
 			break
 		}
 		if readErr != nil {
-			if errors.Is(readErr, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout {
-				requestLogger.Debug().Err(readErr).Msg("skipping circuit breaker failure for proxy request timeout")
+			if errors.Is(readErr, errProxyRequestTimeout) || context.Cause(timeoutCtx) == errProxyRequestTimeout || parentCtx.Err() != nil {
+				if parentCtx.Err() != nil {
+					requestLogger.Debug().Err(readErr).Msg("skipping circuit breaker failure for parent context cancellation")
+				} else {
+					requestLogger.Debug().Err(readErr).Msg("skipping circuit breaker failure for proxy request timeout")
+				}
 			} else {
 				c.circuit.RecordFailure()
 			}
@@ -560,7 +572,11 @@ func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *
 	}
 	if err != nil {
 		if upstreamFailure {
-			c.circuit.RecordFailure()
+			if parentCtx.Err() != nil {
+				requestLogger.Debug().Err(err).Msg("skipping circuit breaker failure for parent context cancellation")
+			} else {
+				c.circuit.RecordFailure()
+			}
 		} else {
 			c.circuit.RecordSuccess()
 		}
@@ -580,7 +596,11 @@ func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *
 	}
 
 	if upstreamFailure {
-		c.circuit.RecordFailure()
+		if parentCtx.Err() != nil {
+			requestLogger.Debug().Err(parentCtx.Err()).Msg("skipping circuit breaker failure for parent context cancellation")
+		} else {
+			c.circuit.RecordFailure()
+		}
 	} else {
 		c.circuit.RecordSuccess()
 	}
