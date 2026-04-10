@@ -455,17 +455,43 @@ func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *
 	headersSent := false
 	chunkIndex := 0
 	for {
-		if !isSSE {
+		readStartedAt := time.Now()
+		readCompletedAt := readStartedAt
+		var n int
+		var readErr error
+		if isSSE {
+			n, readErr = resp.Body.Read(chunk)
+			readCompletedAt = time.Now()
+		} else {
+			readResultCh := make(chan struct {
+				n           int
+				err         error
+				completedAt time.Time
+			}, 1)
+			go func() {
+				n, err := resp.Body.Read(chunk)
+				readResultCh <- struct {
+					n           int
+					err         error
+					completedAt time.Time
+				}{
+					n:           n,
+					err:         err,
+					completedAt: time.Now(),
+				}
+			}()
+
 			select {
+			case readResult := <-readResultCh:
+				n = readResult.n
+				readErr = readResult.err
+				readCompletedAt = readResult.completedAt
 			case <-timeoutCtx.Done():
+				requestLogger.Debug().Err(context.Cause(timeoutCtx)).Msg("skipping circuit breaker failure for proxy request timeout")
+				_ = resp.Body.Close()
 				return fmt.Errorf("read proxied response body: %w", context.Cause(timeoutCtx))
-			default:
 			}
 		}
-
-		readStartedAt := time.Now()
-		n, readErr := resp.Body.Read(chunk)
-		readCompletedAt := time.Now()
 		if n > 0 {
 			responseMsg := tunnel.Message{
 				Type: tunnel.MsgHTTPResponse,
