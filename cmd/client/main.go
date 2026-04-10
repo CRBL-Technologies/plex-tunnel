@@ -40,6 +40,8 @@ func main() {
 	controller.Start()
 	defer controller.Stop()
 
+	// Client configuration environment variables are documented at:
+	// https://docs.portless.app/getting-started
 	uiListen := getenvDefault("PLEXTUNNEL_UI_LISTEN", "127.0.0.1:9090")
 	uiPassword := os.Getenv("PLEXTUNNEL_UI_PASSWORD")
 	uiUsername := strings.TrimSpace(os.Getenv("PLEXTUNNEL_UI_USERNAME"))
@@ -53,7 +55,7 @@ func main() {
 	}
 	if uiListen != "" {
 		if !isLoopbackUIListen(uiListen) && uiPassword == "" {
-			logger.Fatal().Msg("UI bound to non-loopback address without password — set PLEXTUNNEL_UI_PASSWORD to protect it")
+			logger.Warn().Msg("UI bound to non-loopback address without password — set PLEXTUNNEL_UI_PASSWORD to protect it")
 		}
 
 		sessions := newSessionStore(sessionTTL)

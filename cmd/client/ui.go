@@ -179,12 +179,14 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
     * { box-sizing: border-box; }
     body {
       margin: 0;
+      display: flex;
+      flex-direction: column;
       font-family: system-ui, -apple-system, sans-serif;
       color: var(--text);
       background: var(--bg);
       min-height: 100vh;
     }
-    .wrap { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+    .wrap { flex: 1; max-width: 960px; margin: 24px auto; padding: 0 16px; }
     .panel {
       background: var(--card);
       border: 1px solid var(--border);
@@ -434,9 +436,9 @@ var statusPageTmpl = template.Must(template.New("status").Funcs(template.FuncMap
       {{if .Message}}<div class="msg">{{.Message}}</div>{{end}}
       {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     </div>
-  </div>
-  <div style="text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
-    A <a href="https://crbl.io" style="color:var(--accent);text-decoration:none;font-weight:600;">CRBL Technologies</a> product
+    <div style="text-align:center;padding:1.5rem 0 0.5rem;font-size:0.8rem;color:var(--muted);">
+      A <a href="https://crbl.io" style="color:var(--accent);text-decoration:none;font-weight:600;">CRBL Technologies</a> product
+    </div>
   </div>
   <script>
   function fmtTime(s){if(!s||s==="0001-01-01T00:00:00Z")return"-";var d=new Date(s);return d.toISOString().replace("T"," ").slice(0,19)}
