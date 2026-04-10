@@ -303,7 +303,7 @@ func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoo
 
 		switch msg.Type {
 		case tunnel.MsgHTTPRequest:
-			isControl := isControlRequest(msg.Method, msg.Path)
+			isControl := ClassifyRequest(msg.Method, msg.Path) == RouteClassControl
 			release, ok := c.tryAcquireStreamSlot(isControl)
 			if !ok {
 				routeClass := "data"
@@ -653,31 +653,6 @@ func (c *Client) sendProxyError(conn *tunnel.WebSocketConnection, requestID stri
 	}
 	observeProxyResponse(status)
 	return nil
-}
-
-// isStripeEligiblePath mirrors the server classifier at
-// plex-tunnel-server/pkg/server/striping.go:586. A path is stripe-eligible
-// when the server may fan it out across data lanes as many parallel
-// segment requests - the exact saturation source for #89.
-func isStripeEligiblePath(path string) bool {
-	switch {
-	case strings.HasPrefix(path, "/downloadQueue/") && strings.Contains(path, "/media"):
-		return true
-	case strings.HasPrefix(path, "/library/parts/"):
-		return true
-	default:
-		return false
-	}
-}
-
-// isControlRequest reports whether a proxied request should use the
-// control-path semaphore. Only stripe-eligible paths are treated as
-// data-path; everything else (browsing, SSE, metadata, thumbnails, small
-// API calls) is control. method is accepted for future extensibility but
-// is not currently used - stripe eligibility is a path-only property.
-func isControlRequest(method, path string) bool {
-	_ = method
-	return !isStripeEligiblePath(path)
 }
 
 // tryAcquireStreamSlot attempts to take a slot from the control or data

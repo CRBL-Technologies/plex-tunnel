@@ -62,38 +62,6 @@ func TestReadLoop_BusyTunnelSurvivesDeadline(t *testing.T) {
 	}
 }
 
-func TestIsControlRequest(t *testing.T) {
-	tests := []struct {
-		name        string
-		method      string
-		path        string
-		wantControl bool
-	}{
-		{name: "sections browse", method: "GET", path: "/library/sections/1/all", wantControl: true},
-		{name: "metadata", method: "GET", path: "/library/metadata/123", wantControl: true},
-		{name: "media providers", method: "GET", path: "/media/providers", wantControl: true},
-		{name: "eventsource notifications", method: "GET", path: "/:/eventsource/notifications", wantControl: true},
-		{name: "continue watching", method: "GET", path: "/hubs/continueWatching", wantControl: true},
-		{name: "root", method: "GET", path: "/", wantControl: true},
-		{name: "play queues", method: "POST", path: "/playQueues", wantControl: true},
-		{name: "similar parts prefix", method: "GET", path: "/library/partss", wantControl: true},
-		{name: "download queue metadata", method: "GET", path: "/downloadQueue/abc/metadata", wantControl: true},
-		{name: "library parts file", method: "GET", path: "/library/parts/1/file.mkv", wantControl: false},
-		{name: "library parts nested", method: "GET", path: "/library/parts/9999999/foo", wantControl: false},
-		{name: "download queue media", method: "GET", path: "/downloadQueue/abc/media/1.mp4", wantControl: false},
-		{name: "download queue nested media", method: "GET", path: "/downloadQueue/xyz/sub/media/bar", wantControl: false},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := isControlRequest(test.method, test.path)
-			if got != test.wantControl {
-				t.Fatalf("isControlRequest(%q, %q) = %v, want %v", test.method, test.path, got, test.wantControl)
-			}
-		})
-	}
-}
-
 func TestTryAcquireStreamSlot_ControlAndDataUseSeparatePools(t *testing.T) {
 	client := New(Config{}, zerolog.Nop())
 
