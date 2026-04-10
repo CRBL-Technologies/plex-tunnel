@@ -32,6 +32,25 @@ type Config struct {
 	ResponseHeaderTimeout time.Duration
 }
 
+// LoadConfig reads client configuration from environment variables.
+//
+// Tunnel configuration:
+//   PLEXTUNNEL_TOKEN              (required) Authentication token from the Portless dashboard.
+//   PLEXTUNNEL_SERVER_URL         (required) WebSocket endpoint, e.g. wss://tunnel.example.com/tunnel
+//   PLEXTUNNEL_PLEX_TARGET        (default "http://127.0.0.1:32400") Local Plex address to forward requests to.
+//   PLEXTUNNEL_SUBDOMAIN          (optional) Fixed subdomain to request; if unset, the server assigns one.
+//   PLEXTUNNEL_LOG_LEVEL          (default "info") Log verbosity: debug, info, warn, error.
+//   PLEXTUNNEL_MAX_CONNECTIONS    (default server-assigned) Requested websocket pool size (1–32); server may grant fewer.
+//
+// Advanced / tuning:
+//   PLEXTUNNEL_PING_INTERVAL          (default "30s")    WebSocket ping interval.
+//   PLEXTUNNEL_PONG_TIMEOUT           (default "10s")    Time to wait for pong before treating the connection as dead.
+//   PLEXTUNNEL_MAX_RECONNECT_DELAY    (default "60s")    Maximum backoff between reconnection attempts.
+//   PLEXTUNNEL_RESPONSE_CHUNK_SIZE    (default "65536")  Response body chunk size in bytes (1024–4194304).
+//   PLEXTUNNEL_RESPONSE_HEADER_TIMEOUT (default "30s")   Timeout waiting for Plex response headers.
+//
+// Debug:
+//   PLEXTUNNEL_DEBUG_BANDWIDTH_LOGGING (default "false") Emit per-chunk timing logs; requires log level debug.
 func LoadConfig() (Config, error) {
 	cfg := Config{
 		Token:                 strings.TrimSpace(os.Getenv("PLEXTUNNEL_TOKEN")),
