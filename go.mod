@@ -3,18 +3,11 @@ module github.com/CRBL-Technologies/plex-tunnel
 go 1.25
 
 require (
-	github.com/CRBL-Technologies/plex-tunnel-proto v1.2.1-0.20260409133330-26cce9d1c35e
+	github.com/CRBL-Technologies/plex-tunnel-proto v1.2.1-0.20260417163620-25190e6d1408
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.33.0
 	nhooyr.io/websocket v1.8.11
 )
-
-// TODO(#92): plex-tunnel-proto PR #24 is not yet merged/tagged. Consume the
-// draft wire additions (MsgWSWindowUpdate, CapWSFlowControl, WindowIncrement)
-// from paul's worktree. Drop this replace and bump the proto require to the
-// tagged version immediately before the coordinated proto/server/client
-// triple-merge to dev.
-replace github.com/CRBL-Technologies/plex-tunnel-proto => /home/dev/worktrees/paul/plex-tunnel-proto
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
