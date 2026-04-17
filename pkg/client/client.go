@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"nhooyr.io/websocket"
 
 	"github.com/CRBL-Technologies/plex-tunnel-proto/tunnel"
 )
@@ -53,6 +54,8 @@ type sessionPoolController struct {
 	pool                           *ConnectionPool
 	errCh                          chan<- error
 	consecutiveControlPingFailures atomic.Int32
+	wsFlowControlEnabled           atomic.Bool
+	wsRegistry                     *wsStreamRegistry
 }
 
 func newSessionPoolController(
@@ -60,13 +63,34 @@ func newSessionPoolController(
 	ctx context.Context,
 	pool *ConnectionPool,
 	errCh chan<- error,
+	flowControlEnabled bool,
 ) *sessionPoolController {
-	return &sessionPoolController{
+	controller := &sessionPoolController{
 		client: client,
 		ctx:    ctx,
 		pool:   pool,
 		errCh:  errCh,
 	}
+	controller.wsFlowControlEnabled.Store(flowControlEnabled)
+	controller.wsRegistry = newWSStreamRegistry(ctx, client, pool)
+	return controller
+}
+
+func (s *sessionPoolController) wsFlowControl() bool {
+	return s.wsFlowControlEnabled.Load()
+}
+
+func (s *sessionPoolController) reconcileWSFlowControlAck(logger zerolog.Logger, capabilities uint32) {
+	acked := capabilities&tunnel.CapWSFlowControl != 0
+	current := s.wsFlowControlEnabled.Load()
+	if acked == current {
+		return
+	}
+
+	logger.Warn().
+		Bool("current_ws_flow_control_enabled", current).
+		Bool("ack_ws_flow_control_enabled", acked).
+		Msg("ignoring websocket flow-control capability change on register ack")
 }
 
 func (s *sessionPoolController) startSlot(index int, initialConn *tunnel.WebSocketConnection) {
@@ -203,7 +227,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		Subdomain:       c.cfg.Subdomain,
 		ProtocolVersion: tunnel.ProtocolVersion,
 		MaxConnections:  c.cfg.MaxConnections,
-		Capabilities:    tunnel.CapLeasedPool,
+		Capabilities:    tunnel.CapLeasedPool | tunnel.CapWSFlowControl,
 	}); err != nil {
 		_ = controlConn.Close()
 		return fmt.Errorf("Connection failed during handshake. The server may be running an older protocol version. Ensure both client and server are updated. Details: %w", err)
@@ -218,6 +242,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		_ = controlConn.Close()
 		return err
 	}
+	flowControlEnabled := registerAck.Capabilities&tunnel.CapWSFlowControl != 0
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -250,7 +275,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		Msg("client registered")
 
 	errCh := make(chan error, 1)
-	session := newSessionPoolController(c, sessionCtx, pool, errCh)
+	session := newSessionPoolController(c, sessionCtx, pool, errCh, flowControlEnabled)
 	for index := 0; index < registerAck.MaxConnections; index++ {
 		var initialConn *tunnel.WebSocketConnection
 		if index == 0 {
@@ -355,6 +380,7 @@ func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoo
 				return fmt.Errorf("server did not acknowledge leased-pool capability; refusing to use legacy data plane")
 			}
 			ackLogger := c.slotLogger(session.pool, connRef.index)
+			session.reconcileWSFlowControlAck(ackLogger, msg.Capabilities)
 			ackLogger.Info().Msg("received register ack")
 		case tunnel.MsgMaxConnectionsUpdate:
 			capped := msg.MaxConnections
@@ -362,7 +388,47 @@ func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoo
 				capped = maxPoolConnections
 			}
 			session.resize(capped)
-		case tunnel.MsgWSOpen, tunnel.MsgWSFrame, tunnel.MsgWSClose, tunnel.MsgKeyExchange:
+		case tunnel.MsgWSOpen:
+			if err := session.wsRegistry.open(ctx, connRef.conn, msg, session.wsFlowControl()); err != nil {
+				return err
+			}
+		case tunnel.MsgWSFrame:
+			if len(msg.Body) > wsInitialWindowBytes {
+				return fmt.Errorf("received oversize websocket frame body: %d > %d", len(msg.Body), wsInitialWindowBytes)
+			}
+			session.wsRegistry.frame(msg)
+		case tunnel.MsgWSClose:
+			session.wsRegistry.close(msg)
+		case tunnel.MsgWSWindowUpdate:
+			if !session.wsFlowControl() {
+				slotLogger := c.slotLogger(session.pool, connRef.index)
+				slotLogger.Warn().
+					Str("stream_id", msg.ID).
+					Msg("received websocket window update while flow control is disabled")
+				continue
+			}
+			if err := session.wsRegistry.windowUpdate(msg); err != nil {
+				if sendErr := connRef.conn.Send(tunnel.Message{
+					Type:  tunnel.MsgError,
+					ID:    msg.ID,
+					Error: err.Error(),
+				}); sendErr != nil {
+					return fmt.Errorf("send websocket flow-control error: %w", sendErr)
+				}
+				if sendErr := connRef.conn.Send(tunnel.Message{
+					Type:   tunnel.MsgWSClose,
+					ID:     msg.ID,
+					Status: int(websocket.StatusPolicyViolation),
+				}); sendErr != nil {
+					return fmt.Errorf("send websocket flow-control close: %w", sendErr)
+				}
+				session.wsRegistry.close(tunnel.Message{
+					Type:   tunnel.MsgWSClose,
+					ID:     msg.ID,
+					Status: int(websocket.StatusPolicyViolation),
+				})
+			}
+		case tunnel.MsgKeyExchange:
 			c.logger.Warn().Uint8("type", uint8(msg.Type)).Msg("received unsupported message type — server may require a client update")
 		default:
 			c.logger.Warn().Uint8("type", uint8(msg.Type)).Msg("received unknown message type — server may require a client update")
@@ -432,14 +498,7 @@ func (c *Client) handleHTTPRequest(parentCtx, timeoutCtx context.Context, pool *
 		return c.sendProxyError(conn, msg.ID, http.StatusBadGateway, "bad gateway")
 	}
 
-	for key, values := range msg.Headers {
-		canonical := http.CanonicalHeaderKey(key)
-		// Skip headers that should not be forwarded to the upstream.
-		switch canonical {
-		case "Host", "Connection", "Keep-Alive", "Proxy-Authorization",
-			"Proxy-Connection", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
-			continue
-		}
+	for key, values := range cloneForwardHeaders(msg.Headers) {
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
@@ -696,6 +755,54 @@ func resolveTargetURL(baseTarget string, path string) (string, error) {
 	return base.ResolveReference(rel).String(), nil
 }
 
+func resolveWebSocketTargetURL(baseTarget string, path string) (string, error) {
+	targetURL, err := resolveTargetURL(baseTarget, path)
+	if err != nil {
+		return "", err
+	}
+
+	parsed, err := url.Parse(targetURL)
+	if err != nil {
+		return "", fmt.Errorf("parse resolved target: %w", err)
+	}
+
+	switch parsed.Scheme {
+	case "http":
+		parsed.Scheme = "ws"
+	case "https":
+		parsed.Scheme = "wss"
+	default:
+		return "", fmt.Errorf("unsupported plex target scheme %q", parsed.Scheme)
+	}
+
+	return parsed.String(), nil
+}
+
+func cloneForwardHeaders(headers map[string][]string) http.Header {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	filtered := make(http.Header, len(headers))
+	for key, values := range headers {
+		canonical := http.CanonicalHeaderKey(key)
+		switch canonical {
+		case "Host", "Connection", "Keep-Alive", "Proxy-Authorization",
+			"Proxy-Connection", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
+			continue
+		}
+
+		copied := make([]string, len(values))
+		copy(copied, values)
+		filtered[canonical] = copied
+	}
+
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
 func isEventStreamContentType(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/event-stream")
 }
@@ -782,6 +889,9 @@ func (c *Client) maintainPoolSlot(
 		if ctx.Err() != nil {
 			return
 		}
+		if isControl {
+			session.wsRegistry.closeAll(websocket.StatusGoingAway, "control tunnel closed")
+		}
 		if err != nil {
 			slotLogger := c.slotLogger(pool, index)
 			slotLogger.Warn().Err(err).Msg("tunnel session connection disconnected")
@@ -864,7 +974,7 @@ func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool
 		Subdomain:       pool.subdomain,
 		ProtocolVersion: tunnel.ProtocolVersion,
 		SessionID:       pool.sessionID,
-		Capabilities:    tunnel.CapLeasedPool,
+		Capabilities:    tunnel.CapLeasedPool | tunnel.CapWSFlowControl,
 	}
 	if err := conn.Send(register); err != nil {
 		_ = conn.Close()
