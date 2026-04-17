@@ -9,6 +9,13 @@ require (
 	nhooyr.io/websocket v1.8.11
 )
 
+// TODO(#92): plex-tunnel-proto PR #24 is not yet merged/tagged. Consume the
+// draft wire additions (MsgWSWindowUpdate, CapWSFlowControl, WindowIncrement)
+// from paul's worktree. Drop this replace and bump the proto require to the
+// tagged version immediately before the coordinated proto/server/client
+// triple-merge to dev.
+replace github.com/CRBL-Technologies/plex-tunnel-proto => /home/dev/worktrees/paul/plex-tunnel-proto
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
