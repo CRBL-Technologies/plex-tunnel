@@ -242,7 +242,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		_ = controlConn.Close()
 		return err
 	}
-	flowControlEnabled := registerAck.Capabilities&tunnel.CapWSFlowControl != 0
+	flowControlEnabled := wsFlowControlFromAck(registerAck)
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -389,17 +389,29 @@ func (c *Client) readLoopWithConnection(ctx context.Context, session *sessionPoo
 			}
 			session.resize(capped)
 		case tunnel.MsgWSOpen:
+			if c.dropWSMessageIfNotControl(session, connRef, msg) {
+				continue
+			}
 			if err := session.wsRegistry.open(ctx, connRef.conn, msg, session.wsFlowControl()); err != nil {
 				return err
 			}
 		case tunnel.MsgWSFrame:
+			if c.dropWSMessageIfNotControl(session, connRef, msg) {
+				continue
+			}
 			if len(msg.Body) > wsInitialWindowBytes {
 				return fmt.Errorf("received oversize websocket frame body: %d > %d", len(msg.Body), wsInitialWindowBytes)
 			}
 			session.wsRegistry.frame(msg)
 		case tunnel.MsgWSClose:
+			if c.dropWSMessageIfNotControl(session, connRef, msg) {
+				continue
+			}
 			session.wsRegistry.close(msg)
 		case tunnel.MsgWSWindowUpdate:
+			if c.dropWSMessageIfNotControl(session, connRef, msg) {
+				continue
+			}
 			if !session.wsFlowControl() {
 				slotLogger := c.slotLogger(session.pool, connRef.index)
 				slotLogger.Warn().
@@ -696,6 +708,24 @@ func (c *Client) slotLogger(pool *ConnectionPool, index int) zerolog.Logger {
 	return logger.Logger()
 }
 
+// dropWSMessageIfNotControl enforces the ADR 0001 rule that tunneled
+// WebSocket traffic (MsgWSOpen / MsgWSFrame / MsgWSClose / MsgWSWindowUpdate)
+// rides only on the control-lane tunnel connection. A server-side routing
+// bug that delivers a WS message on a data-lane connection is logged and
+// dropped — the session is kept alive because tearing it down would amplify
+// a server misroute into a client-side reconnect storm.
+func (c *Client) dropWSMessageIfNotControl(session *sessionPoolController, connRef *poolConn, msg tunnel.Message) bool {
+	if session.pool.IsControlSlot(connRef.index) {
+		return false
+	}
+	slotLogger := c.slotLogger(session.pool, connRef.index)
+	slotLogger.Warn().
+		Uint8("type", uint8(msg.Type)).
+		Str("stream_id", msg.ID).
+		Msg("dropping websocket message received on data lane")
+	return true
+}
+
 func (c *Client) sendProxyError(conn *tunnel.WebSocketConnection, requestID string, status int, msg string) error {
 	errMsg := tunnel.Message{
 		Type:   tunnel.MsgHTTPResponse,
@@ -839,7 +869,7 @@ func (c *Client) maintainPoolSlot(
 
 		if conn == nil {
 			var err error
-			conn, err = c.joinSessionConnection(ctx, pool)
+			conn, err = c.joinSessionConnection(ctx, pool, session.wsFlowControl())
 			if err != nil {
 				if ctx.Err() != nil {
 					return
@@ -962,7 +992,7 @@ func (c *Client) startConnPingLoop(ctx context.Context, pool *ConnectionPool, co
 	}()
 }
 
-func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool) (*tunnel.WebSocketConnection, error) {
+func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool, expectedWSFlowControl bool) (*tunnel.WebSocketConnection, error) {
 	conn, err := tunnel.DialTunnelWebSocket(ctx, c.cfg.ServerURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect session websocket: %w", err)
@@ -1003,8 +1033,20 @@ func (c *Client) joinSessionConnection(ctx context.Context, pool *ConnectionPool
 		_ = conn.Close()
 		return nil, fmt.Errorf("server returned mismatched subdomain %q for session %q", registerAck.Subdomain, pool.subdomain)
 	}
+	if wsFlowControlFromAck(registerAck) != expectedWSFlowControl {
+		_ = conn.Close()
+		return nil, fmt.Errorf("server join ack diverged on websocket flow-control capability (session=%t, join=%t)", expectedWSFlowControl, wsFlowControlFromAck(registerAck))
+	}
 
 	return conn, nil
+}
+
+// wsFlowControlFromAck reports whether the given RegisterAck advertises
+// CapWSFlowControl. Extracted so the derivation is unit-testable and shared
+// between runSession (which latches the session-level flag) and
+// joinSessionConnection (which rejects divergent join acks).
+func wsFlowControlFromAck(registerAck tunnel.Message) bool {
+	return registerAck.Capabilities&tunnel.CapWSFlowControl != 0
 }
 
 func (c *Client) syncPoolStatus(pool *ConnectionPool) {
